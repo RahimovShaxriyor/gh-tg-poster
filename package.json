@@ -1,0 +1,16 @@
+{
+  "name": "gh-tg-web",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "pack": "powershell -ExecutionPolicy Bypass -File scripts/pack.ps1"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1"
+  }
+}

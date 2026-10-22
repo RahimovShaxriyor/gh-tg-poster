@@ -1,0 +1,19 @@
+# Зависимости
+node_modules/
+
+# Конфигурация и секреты
+.env
+.env.local
+.env.*.local
+
+# База данных и резервные копии
+data/
+backups/
+
+# Скриншоты и временные файлы
+screenshots/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
