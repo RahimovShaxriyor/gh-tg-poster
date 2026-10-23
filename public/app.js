@@ -715,14 +715,17 @@
       return root;
     }
 
+    const meta = postMeta(p);
     if (p.status === "draft") {
       root.append(editorBlock(p));
       root.append(previewBlock(p, () => currentText(p)));
+      if (meta) root.append(accuracyBlock(p, meta));
       root.append(draftActions(p));
       return root;
     }
 
     if (p.text || p.status === "sent") root.append(previewBlock(p, () => p.text || ""));
+    if (meta && (p.text || meta.low_commits?.length || meta.facts?.length)) root.append(accuracyBlock(p, meta));
     root.append(otherActions(p));
     return root;
   }
@@ -832,7 +835,7 @@
       counter.classList.toggle("is-over", len > 4096);
       textarea.classList.toggle("is-over", len > 4096);
       const preview = $("#preview-text");
-      if (preview) fillPreviewText(preview, textarea.value);
+      if (preview) fillPreviewText(preview, textarea.value, previewMarks(p));
     };
 
     textarea.addEventListener("input", () => {
@@ -913,15 +916,68 @@
   }
 
   // --- Предпросмотр как в Telegram ---
-  function fillPreviewText(el, text) {
+  // Ссылки Telegram подсвечивает сам: повторяем это, ничего не превращая в HTML
+  const linkify = (text) => text.split(/(https?:\/\/[^\s<>"«»]+)/g).map((part, i) => (i % 2 ? h("span", { class: "tg-link" }, part) : part));
+
+  function fillPreviewText(el, text, marks = []) {
     el.classList.toggle("is-empty", !text.trim());
     if (!text.trim()) {
       el.textContent = "Пустое сообщение";
       return;
     }
-    // Ссылки Telegram подсвечивает сам: повторяем это, ничего не превращая в HTML
-    const parts = text.split(/(https?:\/\/[^\s<>"«»]+)/g);
-    el.replaceChildren(...parts.map((part, i) => (i % 2 ? h("span", { class: "tg-link" }, part) : part)));
+    el.replaceChildren(...decorate(text, marks));
+  }
+
+  /**
+   * Текст с отметками: [{ quote, cls, title, all }]. Фраза ищется без учёта регистра; all — все вхождения,
+   * иначе первое после предыдущей отметки того же вида (предложения идут по порядку).
+   */
+  function decorate(text, marks) {
+    const low = text.toLowerCase();
+    const ranges = [];
+    const cursor = {};
+    for (const m of marks) {
+      const q = String(m.quote || "").toLowerCase();
+      if (!q) continue;
+      let from = m.all ? 0 : cursor[m.cls] || 0;
+      for (let i = low.indexOf(q, from); i !== -1; i = m.all ? low.indexOf(q, i + q.length) : -1) {
+        ranges.push({ start: i, end: i + q.length, cls: m.cls, title: m.title });
+        cursor[m.cls] = i + q.length;
+      }
+    }
+    if (!ranges.length) return linkify(text);
+    const cuts = [...new Set([0, text.length, ...ranges.flatMap((r) => [r.start, r.end])])].sort((a, b) => a - b);
+    const out = [];
+    for (let k = 0; k < cuts.length - 1; k++) {
+      const [a, b] = [cuts[k], cuts[k + 1]];
+      const cover = ranges.filter((r) => r.start <= a && r.end >= b);
+      const piece = linkify(text.slice(a, b));
+      if (!cover.length) out.push(...piece);
+      else out.push(h("span", { class: [...new Set(cover.map((r) => r.cls))].join(" "), title: cover.map((r) => r.title).filter(Boolean).join("\n") || null }, ...piece));
+    }
+    return out;
+  }
+
+  // Отметки для предпросмотра: проблемные фразы и источники предложений
+  function previewMarks(p) {
+    const meta = postMeta(p);
+    if (!meta) return [];
+    const marks = (meta.check?.issues || []).map((i) => ({ quote: i.quote, cls: "mark-issue", title: "Не подтверждено: " + i.reason, all: true }));
+    for (const sn of meta.sentences || []) marks.push({ quote: sn.quote, cls: "src-sent", title: sourcesText(meta, sn.facts) });
+    return marks;
+  }
+
+  const shortSha = (sha) => (sha === "note" ? "пояснение автора" : String(sha).slice(0, 7));
+  const factById = (meta, id) => (meta.facts || []).find((f) => f.id === id);
+  function sourcesText(meta, ids) {
+    const lines = [];
+    for (const id of ids || []) {
+      const f = factById(meta, id);
+      if (!f) continue;
+      const ev = (f.evidence || []).map((e) => shortSha(e.sha) + (e.file ? " · " + e.file : "")).join(", ");
+      lines.push(`${f.claim}${ev ? " — " + ev : ""}`);
+    }
+    return lines.length ? "Источники:\n" + lines.join("\n") : "Источники не указаны";
   }
 
   function previewBlock(p, getText) {
@@ -929,7 +985,7 @@
     const name = channel.startsWith("@") ? channel.slice(1) : "Ваш канал";
     const sentAt = parseDate(p.sent_at);
     const textEl = h("div", { class: "tg-text", id: p.status === "draft" ? "preview-text" : null });
-    fillPreviewText(textEl, getText());
+    fillPreviewText(textEl, getText(), previewMarks(p));
     return h("section", { class: "block", "aria-label": "Предпросмотр" },
       h("h2", { class: "block-title" }, p.status === "sent" ? "Так выглядит в канале" : "Так увидят подписчики",
         p.status === "sent" && sentAt ? h("time", { class: "detail-meta", datetime: sentAt.toISOString() }, `отправлен ${fullDate(p.sent_at)}`) : null),
@@ -939,6 +995,85 @@
           h("div", { class: "tg-name" }, name),
           textEl,
           h("div", { class: "tg-meta" }, h("time", {}, clock(sentAt || new Date())))))));
+  }
+
+  // --- Проверка точности ---
+  const EXCLUDE_REASONS = {
+    unclear: "неясно из коммитов, ИИ не стал упоминать",
+    not_visible: "техническое изменение, подписчикам не видно",
+    repeat: "уже объявлялось раньше",
+    minor: "неинтересно подписчикам",
+    other: "ИИ не включил в текст",
+  };
+
+  function accuracyBlock(p, meta) {
+    const check = meta.check || {};
+    const issues = check.issues || [];
+    const low = meta.low_commits || [];
+    const block = h("section", { class: "block accuracy", "aria-label": "Проверка точности" }, h("h2", { class: "block-title" }, "Проверка точности"));
+    const line = (kind, text) => h("p", { class: "accuracy-status " + kind }, text);
+
+    if (check.status === "ok") block.append(line("is-ok", "Утверждения сверены с найденными изменениями: замечаний нет. Проверка снижает риск ошибок, но не заменяет ваш просмотр."));
+    else if (check.status === "off") block.append(line("is-warn", "Строгая проверка выключена: ИИ не сверял текст с фактами. Числа, версии, даты, имена файлов и ссылки сверены кодом."));
+    else if (check.status === "needs_review") block.append(line("is-warn", `Требует проверки: ${issues.length} ${plural(issues.length, "замечание", "замечания", "замечаний")}.`));
+    else if (p.status === "failed" && p.text) block.append(line("is-warn", "Текст не прошёл проверку до конца: прочитайте его внимательно."));
+    if (check.regenerated) block.append(h("p", { class: "hint" }, "После первой проверки ИИ переписал текст по замечаниям."));
+    if (low.length) {
+      block.append(line("is-warn", "Мало данных по коммитам: " + low.map((c) => `${c.sha.slice(0, 7)} «${c.message}»`).join(", ") + ". Добавьте пояснения выше и напишите текст заново."));
+    }
+    if (meta.small_input) block.append(line("is-warn", "По этим коммитам мало данных: короткие сообщения и почти нет изменений в коде. Текст может быть общим."));
+    if (meta.fallback_text) block.append(h("p", { class: "hint" }, "ИИ вернул текст без разметки: источники по предложениям не показаны."));
+    if (check.text && p.status === "draft" && currentText(p).trim() !== check.text.trim()) {
+      block.append(h("p", { class: "hint" }, "Текст правили после проверки: правки не проверялись."));
+    }
+
+    if (issues.length) {
+      block.append(h("ul", { class: "issues" }, issues.map((i) => h("li", {},
+        h("span", { class: "mark-issue" }, i.quote), " — ", i.reason,
+        h("span", { class: "issue-src" }, i.source === "code" ? " (сверка с изменениями)" : " (проверка ИИ)")))));
+    }
+
+    // Факты, на которые опирается текст, с коммитами и файлами
+    const used = new Set(meta.used_facts || []);
+    const usedFacts = (meta.facts || []).filter((f) => used.has(f.id));
+    if (usedFacts.length) {
+      const repo = S.settings.repo;
+      const evidence = (e) => e.sha === "note" ? h("span", { class: "ev" }, "пояснение автора")
+        : h("span", { class: "ev" },
+          repo ? h("a", { class: "commit-sha", href: `https://github.com/${repo}/commit/${e.sha}`, target: "_blank", rel: "noopener noreferrer" }, e.sha.slice(0, 7)) : h("span", { class: "commit-sha" }, e.sha.slice(0, 7)),
+          e.file ? h("span", { class: "mono" }, " " + e.file) : null);
+      const sentences = (meta.sentences || []).filter((sn) => sn.facts.length);
+      block.append(h("details", { class: "accuracy-more" },
+        h("summary", {}, `Факты, на которые опирается текст · ${usedFacts.length}`),
+        h("ul", { class: "facts" }, usedFacts.map((f) => h("li", {}, h("span", {}, f.claim), h("span", { class: "evs" }, (f.evidence || []).map(evidence))))),
+        sentences.length ? h("p", { class: "hint" }, "Источник каждого предложения виден при наведении на него в предпросмотре.") : null,
+        sentences.length ? h("ul", { class: "facts sentences" }, sentences.map((sn) => h("li", {},
+          h("span", { class: "src-sent" }, sn.quote),
+          h("span", { class: "hint" }, " ← " + sn.facts.map((id) => factById(meta, id)?.claim).filter(Boolean).join("; "))))) : null));
+    }
+
+    // Что не вошло и почему
+    const reasons = new Map();
+    for (const x of meta.excluded || []) reasons.set(x.id, x.reason);
+    for (const x of meta.skipped || []) reasons.set(x.id, x.reason);
+    for (const f of meta.facts || []) if (!used.has(f.id) && !reasons.has(f.id) && meta.used_facts) reasons.set(f.id, "other");
+    const dropped = [...reasons].map(([id, reason]) => ({ f: factById(meta, id), reason })).filter((x) => x.f);
+    if (dropped.length) {
+      block.append(h("details", { class: "accuracy-more" },
+        h("summary", {}, `Что не вошло и почему · ${dropped.length}`),
+        h("ul", { class: "facts" }, dropped.map(({ f, reason }) => h("li", {}, h("span", {}, f.claim), h("span", { class: "hint" }, " — " + (EXCLUDE_REASONS[reason] || reason)))))));
+    }
+
+    // Уже объявлялось: пункты журнала, на которые опирается текст, и факты-повторы
+    const repeats = (meta.skipped || []).filter((x) => x.reason === "repeat").map((x) => factById(meta, x.id)).filter(Boolean);
+    const announced = meta.announced_used || [];
+    if (announced.length || repeats.length) {
+      block.append(h("div", { class: "accuracy-announced" },
+        h("h3", { class: "label" }, "Уже объявлялось"),
+        announced.length ? h("p", { class: "hint" }, "Связано с уже объявленным: " + announced.join(", ") + ". Проверьте, что это подано как доработка, а не как новинка.") : null,
+        repeats.length ? h("p", { class: "hint" }, "Пропущено как повтор: " + repeats.map((f) => f.claim).join("; ")) : null));
+    }
+    return block;
   }
 
   // --- Действия ---
@@ -992,10 +1127,12 @@
     const text = ($("#editor")?.value ?? currentText(p)).trim();
     if (!text) return toast("Текст пустой: напишите пост или попросите другой вариант.", "error");
     if (text.length > 4096) return toast(`Текст длиннее 4096 символов на ${text.length - 4096}. Сократите его.`, "error");
+    const confirmUnverified = await confirmReview(p);
+    if (confirmUnverified === null) return;
     clearTimeout(S.saveTimers[p.id]);
     await busy(btn, async () => {
       try {
-        await api(`/api/posts/${p.id}/publish`, { method: "POST", body: { text } });
+        await api(`/api/posts/${p.id}/publish`, { method: "POST", body: { text, confirm_unverified: confirmUnverified } });
         delete S.drafts[p.id];
         persistDrafts();
         toast("Опубликовано в канал.");
@@ -1005,6 +1142,19 @@
         await loadState();
       }
     });
+  }
+
+  // Текст с замечаниями проверки публикуется только после подтверждения. null — человек передумал
+  async function confirmReview(p) {
+    if (!p.needs_review) return false;
+    const n = postMeta(p)?.check?.issues?.length || 0;
+    const ok = await confirmDialog({
+      title: "В тексте есть непроверенные утверждения",
+      text: (n ? `Проверка нашла ${n} ${plural(n, "фразу", "фразы", "фраз")}, которых нет в изменениях: они подсвечены в предпросмотре. ` : "") +
+        "Опубликуйте, только если уверены, что всё верно.",
+      ok: "Опубликовать всё равно",
+    });
+    return ok ? true : null;
   }
 
   async function doRetry(p, btn) {
@@ -1017,9 +1167,11 @@
       });
       if (!ok) return;
     }
+    const confirmUnverified = await confirmReview(p);
+    if (confirmUnverified === null) return;
     await busy(btn, async () => {
       try {
-        await api(`/api/posts/${p.id}/publish`, { method: "POST", body: {} });
+        await api(`/api/posts/${p.id}/publish`, { method: "POST", body: { confirm_unverified: confirmUnverified } });
         toast("Опубликовано в канал.");
       } catch (err) {
         fail(err);

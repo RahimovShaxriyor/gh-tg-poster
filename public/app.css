@@ -813,6 +813,77 @@ kbd {
   font-size: var(--fs-xs);
 }
 
+/* Проверка точности */
+.accuracy-status {
+  margin: 0 0 var(--s2);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.accuracy-status.is-ok {
+  color: var(--ok);
+}
+
+.accuracy-status.is-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.mark-issue {
+  background: var(--warn-soft);
+  color: inherit;
+  text-decoration: underline wavy var(--warn);
+  text-underline-offset: 3px;
+}
+
+.src-sent {
+  text-decoration: underline dotted var(--text-3);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.issues,
+.facts {
+  margin: var(--s2) 0;
+  padding-left: var(--s5);
+  font-size: var(--fs-sm);
+}
+
+.issues li,
+.facts li {
+  margin-bottom: 6px;
+}
+
+.issue-src {
+  color: var(--text-3);
+}
+
+.facts .evs {
+  display: block;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.facts .ev + .ev::before {
+  content: ", ";
+}
+
+.accuracy-more {
+  margin-top: var(--s2);
+}
+
+.accuracy-more summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.accuracy-announced {
+  margin-top: var(--s3);
+}
+
 .editor {
   display: block;
   width: 100%;
