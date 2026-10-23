@@ -367,6 +367,7 @@
     render();
     if (S.view === "settings") {
       ensureRepos();
+      ensureModels();
       if (arg) $(`#sec-${arg}`)?.scrollIntoView({ block: "start" });
       else window.scrollTo(0, 0);
     }
@@ -481,20 +482,23 @@
     btn?.setAttribute("aria-expanded", "false");
   }
 
-  async function testConnection(kind, resultEl, btn) {
+  async function testConnection(kind, resultEl, btn, body) {
+    let ok = false;
     await busy(btn, async () => {
       resultEl.hidden = false;
       resultEl.className = resultEl.className.replace(/ ?is-(ok|error)/g, "");
       resultEl.textContent = "Проверяю…";
       try {
-        const res = await api(`/api/test/${kind}`, { method: "POST" });
+        const res = await api(`/api/test/${kind}`, { method: "POST", body: body || {} });
         resultEl.textContent = res.message || "Подключение работает.";
         resultEl.classList.add("is-ok");
+        ok = true;
       } catch (err) {
         resultEl.textContent = err.message;
         resultEl.classList.add("is-error");
       }
     });
+    return ok;
   }
 
   // --- Строка состояния над списком ---
@@ -1052,11 +1056,6 @@
   }
 
   // ===== Настройки =====
-  const MODELS = {
-    anthropic: { list: ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"], hint: "Для коротких постов хватает claude-haiku-5-5: быстрее и дешевле." },
-    openai: { list: [], hint: "Название модели из вашего кабинета OpenAI." },
-  };
-
   function renderSettings() {
     if (!S.loaded) return;
     const s = S.settings;
@@ -1089,7 +1088,6 @@
       $("#ai_provider").value = s.ai_provider || "anthropic";
       secretField("ai_key", s.ai_key_set, s.ai_key_corrupted);
       $("#ai_model").value = s.ai_model || "";
-      updateModelHints();
     });
 
     fill("behavior", () => {
@@ -1186,12 +1184,171 @@
     btn.hidden = !masked;
   }
 
-  function updateModelHints() {
+  // ===== Подсказки моделей ИИ: список у провайдера по ключу пользователя =====
+  // Список только подсказывает: модель попадает в поле, лишь когда человек её выбрал.
+  const PROVIDER_NAMES = { anthropic: "Anthropic", openai: "OpenAI" };
+  // query: текст, набранный после открытия списка; null — список открыт без поиска (показываем всё)
+  const M = { provider: "", models: null, fallback: false, error: "", loading: false, active: -1, req: 0, info: "", query: null };
+
+  // Ключ, который введён в форму, но ещё не сохранён (используется только для запроса списка)
+  const typedAiKey = () => {
+    const input = $("#ai_key");
+    return !input.disabled && input.value.trim() ? input.value.trim() : "";
+  };
+
+  function modelHint() {
     const provider = $("#ai_provider").value;
-    const m = MODELS[provider] || MODELS.anthropic;
-    $("#ai-models").replaceChildren(...m.list.map((v) => h("option", { value: v })));
-    $("#ai-model-hint").textContent = m.hint;
+    if (M.loading) return "Загружаю список моделей…";
+    if (M.models && !M.fallback) return M.info;
+    if (!S.settings.ai_key_set && !typedAiKey()) {
+      return provider === "openai"
+        ? "Название из вашего кабинета OpenAI. Список появится после ввода ключа."
+        : "Список моделей появится после ввода ключа.";
+    }
+    return provider === "openai" ? "Название из вашего кабинета OpenAI." : "";
   }
+
+  function renderModels() {
+    $("#model-combo").classList.toggle("is-loading", M.loading);
+    $("#ai_model").readOnly = M.loading;
+    $("#ai_model").setAttribute("aria-busy", String(M.loading));
+    $("#ai-model-hint").textContent = modelHint();
+    $("#models-error").hidden = !M.error;
+    $("#models-error-text").textContent = M.error;
+    if (!$("#model-list").hidden) renderModelList();
+  }
+
+  function modelOptions() {
+    const list = M.models || [];
+    const q = (M.query || "").trim().toLowerCase();
+    const matches = (id, name = "") => !q || id.toLowerCase().includes(q) || name.toLowerCase().includes(q);
+    // Сохранённую модель показываем, даже если провайдер её не вернул, — но только для её провайдера
+    const saved = (S.settings.ai_provider || "anthropic") === $("#ai_provider").value ? S.settings.ai_model || "" : "";
+    const options = list.filter((m) => matches(m.id, m.name));
+    if (saved && M.models && !M.fallback && !list.some((m) => m.id === saved) && matches(saved)) {
+      options.unshift({ id: saved, name: "", missing: true });
+    }
+    return options;
+  }
+
+  function renderModelList() {
+    const listEl = $("#model-list");
+    const options = modelOptions();
+    if (M.active >= options.length) M.active = options.length - 1;
+    const items = [];
+    if (M.fallback && options.length) items.push(h("li", { class: "combo-note", role: "presentation" }, "Запасной список: может быть неактуальным."));
+    options.forEach((m, i) => {
+      const tags = [];
+      if (m.missing) tags.push(h("span", { class: "tag is-warn" }, "нет в списке провайдера"));
+      if (m.deprecated) tags.push(h("span", { class: "tag is-warn", title: "Провайдер пометил модель как устаревающую" }, "устаревает"));
+      if (m.cheaper) tags.push(h("span", { class: "tag", title: "Определено по названию, цены смотрите у провайдера" }, "обычно дешевле"));
+      items.push(h("li", {
+        class: "combo-option" + (i === M.active ? " is-active" : ""),
+        role: "option",
+        id: `model-opt-${i}`,
+        "aria-selected": String(i === M.active),
+        dataset: { id: m.id },
+        // mousedown, а не click: иначе поле потеряет фокус раньше выбора
+        onmousedown: (e) => {
+          e.preventDefault();
+          chooseModel(m.id);
+        },
+      }, h("span", { class: "mono" }, m.id), m.name && m.name !== m.id ? h("span", { class: "combo-name" }, m.name) : null, ...tags));
+    });
+    if (!options.length) {
+      items.push(h("li", { class: "combo-empty", role: "presentation" },
+        M.models ? "Нет совпадений: можно вписать название вручную." : "Список не загружен: впишите название вручную."));
+    }
+    listEl.replaceChildren(...items);
+    const input = $("#ai_model");
+    if (M.active >= 0) input.setAttribute("aria-activedescendant", `model-opt-${M.active}`);
+    else input.removeAttribute("aria-activedescendant");
+    $(`#model-opt-${M.active}`)?.scrollIntoView({ block: "nearest" });
+    return options;
+  }
+
+  function openModelList() {
+    if ($("#model-list").hidden) M.query = null;
+    $("#model-list").hidden = false;
+    $("#ai_model").setAttribute("aria-expanded", "true");
+    renderModelList();
+  }
+
+  function closeModelList() {
+    $("#model-list").hidden = true;
+    M.active = -1;
+    M.query = null;
+    const input = $("#ai_model");
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  }
+
+  function chooseModel(id) {
+    $("#ai_model").value = id;
+    S.dirty.add("ai");
+    closeModelList();
+  }
+
+  function onModelKeydown(e) {
+    const open = !$("#model-list").hidden;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) openModelList();
+      const count = modelOptions().length;
+      if (!count) return;
+      M.active = e.key === "ArrowDown" ? (M.active + 1) % count : M.active <= 0 ? count - 1 : M.active - 1;
+      renderModelList();
+    } else if (e.key === "Enter" && open && M.active >= 0) {
+      e.preventDefault();
+      chooseModel(modelOptions()[M.active].id);
+    } else if (e.key === "Escape" && open) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeModelList();
+    }
+  }
+
+  async function loadModels({ refresh = false } = {}) {
+    const provider = $("#ai_provider").value;
+    const key = typedAiKey();
+    if (!key && !S.settings.ai_key_set) {
+      Object.assign(M, { provider, models: null, fallback: false, error: "", loading: false });
+      renderModels();
+      return;
+    }
+    const req = ++M.req;
+    Object.assign(M, { provider, loading: true, error: "" });
+    renderModels();
+    try {
+      const res = key
+        ? await api("/api/ai/models", { method: "POST", body: { provider, key, refresh } })
+        : await api(`/api/ai/models?provider=${provider}${refresh ? "&refresh=1" : ""}`);
+      if (req !== M.req) return;
+      const when = new Date(res.fetched_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      Object.assign(M, {
+        models: res.models,
+        fallback: false,
+        info: `Моделей у ${PROVIDER_NAMES[provider]}: ${res.models.length} (список на ${when}). Начните вводить название или выберите из списка.`,
+      });
+    } catch (err) {
+      if (req !== M.req) return;
+      const fallback = err.data?.fallback || [];
+      Object.assign(M, { models: fallback.length ? fallback : null, fallback: true, error: err.message });
+    } finally {
+      if (req === M.req) {
+        M.loading = false;
+        renderModels();
+      }
+    }
+  }
+
+  // При открытии настроек список подгружается один раз, если ключ уже сохранён
+  function ensureModels() {
+    if (!S.loaded || !S.settings.ai_key_set || M.loading) return;
+    if (M.provider === $("#ai_provider").value && (M.models || M.error)) return;
+    loadModels();
+  }
+
 
   async function ensureRepos() {
     if (S.repos || !S.loaded || !S.meta.hasGithub) {
@@ -1269,6 +1426,7 @@
         toast("Сохранено.");
         await loadState();
         if (section === "github") ensureRepos();
+        if (section === "ai") loadModels();
       } catch (err) {
         fail(err);
       }
@@ -1317,8 +1475,13 @@
 
     for (const btn of $$("[data-test]")) {
       btn.addEventListener("click", async () => {
-        await testConnection(btn.dataset.test, $(`[data-result="${btn.dataset.test}"]`), btn);
-        if (btn.dataset.test === "telegram") loadState(); // имя бота из свежего getMe
+        const kind = btn.dataset.test;
+        const body = kind === "ai"
+          ? { provider: $("#ai_provider").value, model: $("#ai_model").value.trim(), key: typedAiKey() || undefined }
+          : undefined;
+        const ok = await testConnection(kind, $(`[data-result="${kind}"]`), btn, body);
+        if (kind === "telegram") loadState(); // имя бота из свежего getMe
+        if (kind === "ai" && ok) loadModels();
       });
     }
 
@@ -1326,7 +1489,29 @@
       const branch = e.target.selectedOptions[0]?.dataset.branch;
       if (branch) $("#branch").value = branch;
     });
-    $("#ai_provider").addEventListener("change", updateModelHints);
+    $("#ai_provider").addEventListener("change", () => {
+      Object.assign(M, { models: null, error: "" });
+      closeModelList();
+      loadModels();
+    });
+    const modelInput = $("#ai_model");
+    modelInput.addEventListener("input", () => {
+      openModelList();
+      M.active = -1;
+      M.query = modelInput.value;
+      renderModelList();
+    });
+    modelInput.addEventListener("focus", () => {
+      if (M.models) openModelList();
+    });
+    // Клик по полю, которое уже в фокусе, тоже открывает список
+    modelInput.addEventListener("click", () => {
+      if ($("#model-list").hidden) openModelList();
+    });
+    modelInput.addEventListener("blur", closeModelList);
+    modelInput.addEventListener("keydown", onModelKeydown);
+    $("#btn-models-refresh").addEventListener("click", () => loadModels({ refresh: true }));
+    $("#btn-models-retry").addEventListener("click", () => loadModels({ refresh: true }));
     $("#mode").addEventListener("change", (e) => {
       $("#digest-fields").hidden = e.target.value !== "digest";
     });
@@ -1520,7 +1705,10 @@
     if (!location.hash) history.replaceState(null, "", "#posts");
     applyRoute();
     loadState().then(() => {
-      if (S.view === "settings") ensureRepos();
+      if (S.view === "settings") {
+        ensureRepos();
+        ensureModels();
+      }
       flushSaves();
     });
   }

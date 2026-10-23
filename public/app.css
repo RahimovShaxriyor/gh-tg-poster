@@ -1107,6 +1107,118 @@ kbd {
   margin-bottom: var(--s3);
 }
 
+/* Поле «Модель»: список с поиском и свободным вводом */
+.label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin-bottom: 6px;
+}
+
+.label-row .label {
+  margin-bottom: 0;
+}
+
+.combo {
+  position: relative;
+}
+
+.combo-skeleton {
+  display: none;
+  position: absolute;
+  top: 12px;
+  left: var(--s3);
+  width: 45%;
+  height: 12px;
+}
+
+.combo.is-loading .combo-skeleton {
+  display: block;
+}
+
+.combo.is-loading .input {
+  color: transparent;
+}
+
+.combo.is-loading .input::placeholder {
+  color: transparent;
+}
+
+.combo-list {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  z-index: 10;
+  max-height: 288px;
+  margin: var(--s1) 0 0;
+  padding: var(--s1);
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+.combo-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--s2);
+  padding: 6px var(--s2);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.combo-option:hover {
+  background: var(--surface-2);
+}
+
+/* Активный вариант при управлении с клавиатуры — видимая рамка */
+.combo-option.is-active {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
+
+.combo-option .mono {
+  font-size: var(--fs-sm);
+}
+
+.combo-name {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.combo-note,
+.combo-empty {
+  padding: 6px var(--s2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.tag {
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.tag.is-warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.models-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
 .presets {
   margin-top: var(--s2);
 }

@@ -252,10 +252,20 @@
             </div>
 
             <div class="field">
-              <label class="label" for="ai_model">Модель</label>
-              <input type="text" id="ai_model" name="ai_model" class="input" list="ai-models" autocomplete="off" spellcheck="false">
-              <datalist id="ai-models"></datalist>
-              <p class="hint" id="ai-model-hint"></p>
+              <div class="label-row">
+                <label class="label" for="ai_model" id="ai-model-label">Модель</label>
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-models-refresh">Обновить список</button>
+              </div>
+              <div class="combo" id="model-combo">
+                <input type="text" id="ai_model" name="ai_model" class="input" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="model-list" autocomplete="off" spellcheck="false" placeholder="Начните вводить или выберите из списка">
+                <span class="combo-skeleton skeleton" aria-hidden="true"></span>
+                <ul class="combo-list" id="model-list" role="listbox" aria-labelledby="ai-model-label" hidden></ul>
+              </div>
+              <p class="hint" id="ai-model-hint" aria-live="polite"></p>
+              <div class="result is-error models-error" id="models-error" role="status" hidden>
+                <span id="models-error-text"></span>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-models-retry">Повторить</button>
+              </div>
             </div>
 
             <div class="section-actions">
