@@ -4,7 +4,7 @@ $sourceDir = Split-Path -Parent $PSScriptRoot
 
 if (Test-Path $dest) { Remove-Item $dest -Force }
 
-$items = Get-ChildItem -Path $sourceDir -Exclude "node_modules", "data", ".env", "*.zip"
+$items = Get-ChildItem -Path $sourceDir -Exclude "node_modules", "data", "backups", "screenshots", ".git", ".env", "*.zip"
 $tempDir = Join-Path $env:TEMP "gh-tg-web-pack"
 if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
 New-Item -ItemType Directory -Path "$tempDir\gh-tg-web\data" -Force | Out-Null

@@ -4,7 +4,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "pack": "powershell -ExecutionPolicy Bypass -File scripts/pack.ps1"
+    "pack": "sh scripts/pack.sh",
+    "pack:win": "powershell -ExecutionPolicy Bypass -File scripts/pack.ps1"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

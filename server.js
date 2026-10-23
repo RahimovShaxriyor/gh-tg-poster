@@ -1,7 +1,11 @@
+// Новые файлы (база, её журнал) доступны только владельцу процесса
+process.umask(0o077);
+
+const fs = require("fs");
 const path = require("path");
 const { createDatabase } = require("./lib/db");
 const { gh, tg, deleteWebhook, ai, buildInput, sleep } = require("./lib/services");
-const { publish, generate, check, getStatus } = require("./lib/poster");
+const { publish, generate, check, waitIdle } = require("./lib/poster");
 const { createApp } = require("./lib/app");
 const { cleanError } = require("./lib/crypto");
 const { handleUpdate } = require("./lib/telegram-bot");
@@ -10,17 +14,65 @@ const PASS = process.env.ADMIN_PASSWORD;
 const SECRET = process.env.SESSION_SECRET || PASS;
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
 const PORT = process.env.PORT || 3000;
+const DATA_DIR = "data";
 
-// Если запуск напрямую без пароля — завершаем с понятной ошибкой
-if (require.main === module && !PASS) {
-  console.error("Задай ADMIN_PASSWORD в .env");
-  process.exit(1);
-}
-if (require.main === module && !process.env.SESSION_SECRET) {
-  console.warn("Предупреждение: SESSION_SECRET не задан, cookie сессий подписываются паролем администратора.");
+/**
+ * Проверка переменных окружения при запуске. Значения-заглушки из .env.example известны всем,
+ * поэтому с ними сервер не стартует.
+ */
+function checkEnv() {
+  const problems = [];
+  let example = {};
+  try {
+    example = Object.fromEntries(
+      fs.readFileSync(path.join(__dirname, ".env.example"), "utf8")
+        .split("\n")
+        .filter((l) => /^[A-Z_]+=/.test(l))
+        .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)])
+    );
+  } catch {}
+  for (const k of ["ADMIN_PASSWORD", "SESSION_SECRET", "ENCRYPTION_KEY"]) {
+    if (process.env[k] && example[k] && process.env[k] === example[k]) {
+      problems.push(`${k} совпадает с примером из .env.example: придумайте своё значение`);
+    }
+  }
+  if (!PASS) problems.push("Задай ADMIN_PASSWORD в .env");
+  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
+    problems.push("Задай SESSION_SECRET в .env: случайная строка не короче 32 символов (openssl rand -hex 32)");
+  }
+  if (PASS && PASS.length < 12) {
+    console.warn("Предупреждение: ADMIN_PASSWORD короче 12 символов, его легче подобрать.");
+  }
+  if (problems.length) {
+    for (const p of problems) console.error(p);
+    process.exit(1);
+  }
 }
 
-const dbBundle = createDatabase("data/app.db", ENCRYPTION_KEY);
+/**
+ * Папка data смонтирована с хоста. Если её владелец не совпадает с пользователем контейнера,
+ * объясняем, как починить, вместо невнятной ошибки SQLite.
+ */
+function checkDataDir() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+    fs.accessSync(DATA_DIR, fs.constants.W_OK);
+  } catch {
+    const uid = typeof process.getuid === "function" ? process.getuid() : "?";
+    console.error(
+      `Папка ${path.resolve(DATA_DIR)} недоступна для записи (процесс работает от uid ${uid}).\n` +
+      `На сервере выполните в папке проекта: sudo chown -R ${uid}:${uid} data`
+    );
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  checkEnv();
+  checkDataDir();
+}
+
+const dbBundle = createDatabase(path.join(DATA_DIR, "app.db"), ENCRYPTION_KEY);
 
 const ctx = {
   ...dbBundle,
@@ -42,6 +94,7 @@ const ctx = {
   GITHUB_APP_PRIVATE_KEY_PATH: process.env.GITHUB_APP_PRIVATE_KEY_PATH,
 };
 
+let stopping = false;
 let pollIntervalTimer = null;
 let nextPollAt = null;
 function schedulePoll() {
@@ -50,7 +103,7 @@ function schedulePoll() {
   nextPollAt = Date.now() + ms;
   pollIntervalTimer = setInterval(() => {
     nextPollAt = Date.now() + ms;
-    check(false, ctx);
+    if (!stopping) check(false, ctx);
   }, ms);
 }
 ctx.schedulePoll = schedulePoll;
@@ -58,7 +111,7 @@ ctx.getNextPollAt = () => nextPollAt;
 
 const app = createApp(ctx);
 
-// Фоновый цикл Telegram для автоопределения канала, в который добавлен бот
+// Фоновый цикл Telegram: автоопределение канала, команды и кнопки владельца
 let tgLoopRunning = false;
 let lastWebhookDeletedToken = null;
 
@@ -67,7 +120,7 @@ async function startTgLoop() {
   tgLoopRunning = true;
   let offset = 0;
 
-  for (;;) {
+  while (!stopping) {
     try {
       const token = dbBundle.get("tg_token");
       if (!token) {
@@ -101,19 +154,43 @@ async function startTgLoop() {
         }
       }
     } catch (err) {
+      if (stopping) break;
       console.error("Ошибка в цикле Telegram:", cleanError(err.message));
       await sleep(10000);
     }
   }
 }
 
+/**
+ * Корректная остановка: перестаём принимать запросы и запускать проверки, ждём текущие
+ * отправку и генерацию (не дольше 25 с, docker-compose даёт 30 с), закрываем базу.
+ */
+function shutdown(server, signal) {
+  if (stopping) return;
+  stopping = true;
+  console.log(`Получен ${signal}, завершаю работу…`);
+  if (pollIntervalTimer) clearInterval(pollIntervalTimer);
+  server.close();
+  waitIdle(25000).then((idle) => {
+    if (!idle) console.warn("Не все операции успели завершиться: при старте они будут помечены как прерванные.");
+    try {
+      dbBundle.db.close();
+    } catch {}
+    process.exit(0);
+  });
+}
+
 if (require.main === module) {
   startTgLoop().catch((err) => console.error("Ошибка startTgLoop:", cleanError(err.message)));
-  setTimeout(() => check(false, ctx), 5000);
+  setTimeout(() => {
+    if (!stopping) check(false, ctx);
+  }, 5000);
   schedulePoll();
 
   process.on("unhandledRejection", (e) => console.error("Необработанная ошибка промиса:", cleanError(e?.message || e)));
-  app.listen(PORT, () => console.log("Готово: порт", PORT));
+  const server = app.listen(PORT, () => console.log("Готово: порт", PORT));
+  process.on("SIGTERM", () => shutdown(server, "SIGTERM"));
+  process.on("SIGINT", () => shutdown(server, "SIGINT"));
 }
 
 module.exports = {

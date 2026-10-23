@@ -3,24 +3,41 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    # Папка data на хосте должна принадлежать uid 1000 (пользователь node в контейнере):
+    # sudo chown -R 1000:1000 data
     volumes:
       - ./data:/app/data
+    # Время на корректную остановку: сервер дожидается текущей отправки или генерации
+    stop_grace_period: 30s
+    init: true
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
   caddy:
     image: caddy:2
     restart: unless-stopped
-    env_file: .env
+    # Caddy нужен только домен, пароли и ключи из .env ему не передаются
+    environment:
+      DOMAIN: ${DOMAIN}
     ports: ["80:80", "443:443"]
     depends_on:
       app:
         condition: service_healthy
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 volumes:
   caddy_data:
