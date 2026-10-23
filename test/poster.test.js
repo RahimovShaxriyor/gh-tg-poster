@@ -1,4 +1,5 @@
 const { describe, it, before, after, afterEach } = require("node:test");
+const { postAi } = require("./helpers/fake-ai");
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const { createDatabase } = require("../lib/db");
@@ -31,7 +32,7 @@ describe("Перегенерация, таймауты, зависшие пос�
         sentMessages.push({ method, body });
         return { ok: true, result: { message_id: 1 } };
       },
-      ai: async () => "Новый вариант анонса",
+      aiCall: postAi(async () => "Новый вариант анонса"),
     };
     server = http.createServer(createApp(ctx));
     await new Promise((resolve) => server.listen(0, resolve));

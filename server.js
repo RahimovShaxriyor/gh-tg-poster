@@ -4,7 +4,7 @@ process.umask(0o077);
 const fs = require("fs");
 const path = require("path");
 const { createDatabase } = require("./lib/db");
-const { gh, tg, deleteWebhook, ai, buildInput, sleep } = require("./lib/services");
+const { gh, tg, deleteWebhook, ai, aiCall, buildInput, buildInputData, sleep } = require("./lib/services");
 const { publish, generate, check, waitIdle } = require("./lib/poster");
 const { createApp } = require("./lib/app");
 const { cleanError } = require("./lib/crypto");
@@ -86,7 +86,9 @@ const ctx = {
   tg,
   deleteWebhook,
   ai,
+  aiCall,
   buildInput,
+  buildInputData,
   post: dbBundle.post,
   getPosts: dbBundle.getPosts,
   countPosts: dbBundle.countPosts,

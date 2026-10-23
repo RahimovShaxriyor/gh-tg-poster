@@ -6,6 +6,7 @@ const { createApp } = require("../lib/app");
 const { buildInput, ai } = require("../lib/services");
 const { publish, generate, check } = require("../lib/poster");
 const { encrypt, decrypt } = require("../lib/crypto");
+const { anthropicFetch } = require("./helpers/fake-ai");
 
 describe("gh-tg-web тесты", () => {
   const TEST_PASS = "admin-secret-password-123";
@@ -188,7 +189,7 @@ describe("gh-tg-web тесты", () => {
     assert.equal(testCtx.countPosts(), 0);
 
     // 2-й вызов: появился новый коммит c1
-    mockFetchHandler = async (url) => {
+    mockFetchHandler = async (url, opts) => {
       const u = String(url);
       if (u.includes("/commits?")) {
         return new Response(
@@ -208,12 +209,7 @@ describe("gh-tg-web тесты", () => {
         );
       }
       if (u.includes("anthropic.com")) {
-        return new Response(
-          JSON.stringify({
-            content: [{ type: "text", text: "В приложении появилась долгожданная корзина товаров! 🛒" }],
-          }),
-          { status: 200 }
-        );
+        return anthropicFetch({ text: "В приложении появилась долгожданная корзина товаров! 🛒" })(url, opts);
       }
       return new Response("{}", { status: 404 });
     };
@@ -259,9 +255,7 @@ describe("gh-tg-web тесты", () => {
         });
       }
       if (u.includes("anthropic.com")) {
-        return new Response(JSON.stringify({ content: [{ type: "text", text: "Добавлена тёмная тема! 🌙" }] }), {
-          status: 200,
-        });
+        return anthropicFetch({ text: "Добавлена тёмная тема! 🌙" })(url, opts);
       }
       if (u.includes("telegram.org") && u.includes("sendMessage")) {
         tgSent = true;
@@ -285,7 +279,7 @@ describe("gh-tg-web тесты", () => {
     testCtx.set("mode", "approve");
     testCtx.set("last_sha", "c2");
 
-    mockFetchHandler = async (url) => {
+    mockFetchHandler = async (url, opts) => {
       const u = String(url);
       if (u.includes("/commits?")) {
         return new Response(
@@ -300,7 +294,7 @@ describe("gh-tg-web тесты", () => {
         return new Response(JSON.stringify({ files: [] }), { status: 200 });
       }
       if (u.includes("anthropic.com")) {
-        return new Response(JSON.stringify({ content: [{ type: "text", text: "SKIP" }] }), { status: 200 });
+        return anthropicFetch({ text: "SKIP" })(url, opts);
       }
       return new Response("{}", { status: 404 });
     };
@@ -614,7 +608,7 @@ describe("gh-tg-web тесты", () => {
     testCtx.set("last_digest_sha", "c1");
     testCtx.set("last_digest_date", "2000-01-01"); // старая дата, чтобы дайджест сработал
 
-    mockFetchHandler = async (url) => {
+    mockFetchHandler = async (url, opts) => {
       const u = String(url);
       if (u.includes("/commits?")) {
         return new Response(
@@ -630,12 +624,7 @@ describe("gh-tg-web тесты", () => {
         return new Response(JSON.stringify({ files: [{ filename: "app.js", patch: "+code" }] }), { status: 200 });
       }
       if (u.includes("anthropic.com")) {
-        return new Response(
-          JSON.stringify({
-            content: [{ type: "text", text: "Главные обновления за день: 1. Дайджест коммит 1. 2. Дайджест коммит 2." }],
-          }),
-          { status: 200 }
-        );
+        return anthropicFetch({ text: "Главные обновления за день: 1. Дайджест коммит 1. 2. Дайджест коммит 2." })(url, opts);
       }
       return new Response("{}", { status: 404 });
     };
@@ -652,6 +641,7 @@ describe("gh-tg-web тесты", () => {
       .prepare("insert into posts(head,input) values(?,?)")
       .run("head-empty", "input-empty");
 
+    // Пустой ответ на каждом шаге конвейера
     mockFetchHandler = async (url) => {
       return new Response(JSON.stringify({ content: [{ type: "text", text: "   " }] }), { status: 200 });
     };
@@ -666,9 +656,7 @@ describe("gh-tg-web тесты", () => {
       .run("head-long", "input-long");
 
     const hugeText = "А".repeat(5000);
-    mockFetchHandler = async (url) => {
-      return new Response(JSON.stringify({ content: [{ type: "text", text: hugeText }] }), { status: 200 });
-    };
+    mockFetchHandler = anthropicFetch({ text: hugeText });
 
     await generate(Number(idLong), false, testCtx);
     const postLong = testCtx.post(Number(idLong));

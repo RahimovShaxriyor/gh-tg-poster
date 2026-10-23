@@ -1,4 +1,5 @@
 const { describe, it, before, after } = require("node:test");
+const { postAi } = require("./helpers/fake-ai");
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const { createDatabase } = require("../lib/db");
@@ -18,10 +19,11 @@ describe("Настройки, прокси, дайджест", () => {
       ...createDatabase(":memory:", "settings-test-key"),
       ADMIN_PASSWORD: TEST_PASS,
       SESSION_SECRET: TEST_PASS,
-      ai: async (input, force, opts) => {
-        aiCalls.push(opts);
+      // Шаг написания конвейера: промпт дайджеста или обычного поста
+      aiCall: postAi((req) => {
+        aiCalls.push({ isDigest: req.system.includes("дайджест изменений за день") });
         return "Новый текст";
-      },
+      }),
     };
     server = http.createServer(createApp(ctx));
     await new Promise((resolve) => server.listen(0, resolve));
@@ -158,10 +160,10 @@ describe("Настройки, прокси, дайджест", () => {
         calls.push(args);
         return "input";
       },
-      ai: async (input, force, opts) => {
-        calls.push(["ai", opts.isDigest]);
+      aiCall: postAi((req) => {
+        calls.push(["ai", req.system.includes("дайджест изменений за день")]);
         return "Дайджест";
-      },
+      }),
     };
     digestCtx.set("repo", "o/r");
     digestCtx.set("github_installation_id", "42");

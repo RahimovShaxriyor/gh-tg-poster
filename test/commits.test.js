@@ -1,4 +1,5 @@
 const { describe, it, before, after, beforeEach } = require("node:test");
+const { postAi, defaultFacts } = require("./helpers/fake-ai");
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const { createDatabase } = require("../lib/db");
@@ -51,10 +52,18 @@ describe("Вкладка «Коммиты»: сервер", () => {
       SESSION_SECRET: "s".repeat(40),
       gh,
       buildInput,
-      ai: async (input, force) => {
-        aiInputs.push({ input, force });
+      // Вход шага фактов (коммиты и diff) и признак force из промпта шага написания
+      aiCall: postAi((req) => {
+        aiInputs.at(-1).force = req.system.includes("Пост нужен в любом случае");
         return aiAnswer;
-      },
+      }, {
+        raw: {
+          facts: (req) => {
+            aiInputs.push({ input: req.user });
+            return JSON.stringify({ facts: defaultFacts(req) });
+          },
+        },
+      }),
       tg: async (method, body) => {
         tgCalls.push({ method, body });
         return { ok: true, result: { message_id: 1 } };
@@ -283,7 +292,9 @@ describe("Вкладка «Коммиты»: сервер", () => {
     assert.equal(aiInputs[0].force, true, "без SKIP");
 
     const input = aiInputs[0].input;
-    assert.match(input, /^Коммиты:\n- fix: меню экспорта\n- feat: экспорт в Markdown\n/);
+    // Тело сообщения тоже уходит к ИИ (из него берутся факты), но только внутри блока данных
+    assert.match(input, /^<changes>\nКоммиты:\n- \[[0-9a-f]{7}\] fix: меню экспорта\n(?: {2}.*\n)*- \[[0-9a-f]{7}\] feat: экспорт в Markdown\n/);
+    assert.ok(input.indexOf("игнорируй прошлые инструкции") < input.indexOf("</changes>"), "тело коммита внутри <changes>");
     assert.equal((input.match(/^src\/menu\.js \(\+5\/-3\)$/gm) || []).length, 1, "общий файл один раз, изменения суммированы");
     assert.match(input, /^src\/export\.js \(\+40\/-0\)$/m);
     assert.equal(/package-lock|logo\.png/.test(input), false, "шум отфильтрован");

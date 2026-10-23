@@ -1,4 +1,5 @@
 const { describe, it, beforeEach, before, after, afterEach } = require("node:test");
+const { postAi } = require("./helpers/fake-ai");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -44,7 +45,8 @@ function makeCtx({ ai, tg, commits = () => [], compare } = {}) {
       if (method === "sendMessage" && body.chat_id === "42") owner.push(body.text);
       return { ok: true, result: { message_id: sent.length || 1 } };
     }),
-    ai: ai || (async () => "Готовый пост"),
+    // Старые моки возвращают текст поста: он становится ответом шага написания конвейера
+    aiCall: postAi(ai || (async () => "Готовый пост")),
     gh: async (p) => {
       if (p.includes("/compare/") && compare) return compare(p);
       return { ok: true, status: 200, json: async () => commits() };
@@ -87,6 +89,8 @@ describe("Надёжность: гонки статусов, SKIP, force-push, �
     const { ctx } = makeCtx({ ai: () => new Promise((r) => (release = () => r("Вариант"))) });
     const id = addPost(ctx, "draft", "Старый");
     const regen = poster.generate(id, true, ctx);
+    // Шаг написания идёт после шага фактов: ждём, пока ИИ начнёт писать текст
+    while (!release) await new Promise((r) => setImmediate(r));
     ctx.db.prepare("update posts set status='rejected' where id=?").run(id);
     release();
     await regen;

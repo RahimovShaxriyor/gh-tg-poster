@@ -1,4 +1,5 @@
 const { describe, it, beforeEach } = require("node:test");
+const { postAi } = require("./helpers/fake-ai");
 const assert = require("node:assert/strict");
 const { createDatabase } = require("../lib/db");
 const { handleUpdate, runCheckCommand } = require("../lib/telegram-bot");
@@ -49,7 +50,7 @@ describe("Бот в личке: команды /check, /status, /help и кно�
         return { ok: true, result: { message_id: 1 } };
       },
       gh: async () => ({ ok: true, status: 200, json: async () => commits }),
-      ai: (...args) => aiAnswer(...args),
+      aiCall: postAi((...args) => aiAnswer(...args)),
       buildInput: async (r, b, h, msgs) => "Коммиты:\n" + msgs.join("\n"),
     };
     console.log = log;
