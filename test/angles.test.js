@@ -21,15 +21,24 @@ describe("Шаг «Заход»", () => {
     assert.match(a.system, /Никаких чисел, сроков, обещаний и сравнений «было — стало», которых нет в фактах/);
   });
 
-  it("три захода в одном ответе; выбранный (первый) уходит в написание блоком <angle>", async () => {
+  it("три захода в одном ответе; при «один вариант» первый заход уходит в написание блоком <angle>", async () => {
     const calls = [];
-    const r = await run({ call: fakeAi({ facts: [FACT], calls }) });
+    const r = await run({ variants: 1, call: fakeAi({ facts: [FACT], calls }) });
     assert.deepEqual(r.meta.angles.list.map((x) => [x.id, x.type]), [["a1", "benefit"], ["a2", "story"], ["a3", "question"]]);
     assert.equal(r.meta.angles.focus, "Главное для читателя");
     assert.equal(r.meta.angle, "a1");
     const write = calls.find((c) => c.step === "write");
-    assert.match(write.user, /<angle>\n\{\n "name": "Польза",\n "hook": "Теперь это можно сделать быстрее",/);
+    assert.match(write.user, /<angle>\n\{\n "id": "a1",\n "name": "Польза",\n "hook": "Теперь это можно сделать быстрее",/);
     assert.match(write.system, /Заход — подача, а не источник фактов: утверждения только из <facts>/);
+  });
+
+  it("при «три варианта» в написание уходят все заходы блоком <angles>, ответ — три варианта", async () => {
+    const calls = [];
+    await run({ variants: 3, call: fakeAi({ facts: [FACT], calls }) });
+    const write = calls.find((c) => c.step === "write");
+    assert.match(write.user, /<angles>\n\[\n \{\n {2}"id": "a1",[\s\S]*"id": "a3"[\s\S]*<\/angles>/);
+    assert.equal(write.user.includes("<angle>"), false);
+    assert.match(write.system, /Напиши 3 варианта — по одному на каждый заход из <angles>/);
   });
 
   it("разбор: первая строка не длиннее 90 символов, повтор типа заменяется свободным, мусор пропускается", () => {

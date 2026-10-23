@@ -835,7 +835,7 @@
       counter.classList.toggle("is-over", len > 4096);
       textarea.classList.toggle("is-over", len > 4096);
       const preview = $("#preview-text");
-      if (preview) fillPreviewText(preview, textarea.value, previewMarks(p));
+      if (preview) fillPreviewText(preview, textarea.value, previewMarks(p), !!postMeta(p)?.headline);
     };
 
     textarea.addEventListener("input", () => {
@@ -919,13 +919,17 @@
   // Ссылки Telegram подсвечивает сам: повторяем это, ничего не превращая в HTML
   const linkify = (text) => text.split(/(https?:\/\/[^\s<>"«»]+)/g).map((part, i) => (i % 2 ? h("span", { class: "tg-link" }, part) : part));
 
-  function fillPreviewText(el, text, marks = []) {
+  function fillPreviewText(el, text, marks = [], bold = false) {
     el.classList.toggle("is-empty", !text.trim());
     if (!text.trim()) {
       el.textContent = "Пустое сообщение";
       return;
     }
-    el.replaceChildren(...decorate(text, marks));
+    // Заголовок от конвейера бот публикует жирным: так же и в предпросмотре
+    const nl = text.indexOf("\n");
+    if (!bold || nl === 0) return el.replaceChildren(...decorate(text, marks));
+    const head = nl === -1 ? text : text.slice(0, nl);
+    el.replaceChildren(h("strong", {}, ...decorate(head, marks)), ...(nl === -1 ? [] : decorate(text.slice(nl), marks)));
   }
 
   /**
@@ -985,7 +989,7 @@
     const name = channel.startsWith("@") ? channel.slice(1) : "Ваш канал";
     const sentAt = parseDate(p.sent_at);
     const textEl = h("div", { class: "tg-text", id: p.status === "draft" ? "preview-text" : null });
-    fillPreviewText(textEl, getText(), previewMarks(p));
+    fillPreviewText(textEl, getText(), previewMarks(p), !!postMeta(p)?.headline);
     return h("section", { class: "block", "aria-label": "Предпросмотр" },
       h("h2", { class: "block-title" }, p.status === "sent" ? "Так выглядит в канале" : "Так увидят подписчики",
         p.status === "sent" && sentAt ? h("time", { class: "detail-meta", datetime: sentAt.toISOString() }, `отправлен ${fullDate(p.sent_at)}`) : null),
