@@ -325,11 +325,13 @@
               <label class="form-label">Владелец бота (для уведомлений в личные сообщения)</label>
               <div class="input-row">
                 <div class="form-input" id="owner-chat-info" style="display: flex; align-items: center; background-color: var(--bg-subtle);">
-                  Владелец ещё не назначен. Откройте диалог с ботом и нажмите /start
+                  Владелец ещё не назначен. Нажмите «Получить код» и отправьте его боту
                 </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-owner-code">Получить код</button>
                 <button type="button" class="btn btn-danger btn-sm" id="btn-reset-owner" style="display: none;">Сбросить</button>
               </div>
-              <span class="form-hint">Бот запоминает первого пользователя, который написал /start в личке, и отправляет ему черновики на согласование.</span>
+              <div class="test-result-box" id="owner-code-box"></div>
+              <span class="form-hint">Нажмите «Получить код» и отправьте боту в личные сообщения команду /start с кодом (код действует 15 минут). Владелец получает черновики на согласование, а канал привяжется автоматически, только если бота добавит админом сам владелец.</span>
             </div>
 
             <div class="section-actions">

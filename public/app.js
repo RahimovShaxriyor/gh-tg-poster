@@ -37,6 +37,33 @@
   const $ = (id) => document.getElementById(id);
   const $$ = (sel) => document.querySelectorAll(sel);
 
+  // Helper: SVG icon built via DOM API (no innerHTML)
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  function svgIcon(size, shapes) {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    for (const [k, v] of Object.entries({ width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2" })) {
+      svg.setAttribute(k, v);
+    }
+    for (const [tag, attrs] of shapes) {
+      const el = document.createElementNS(SVG_NS, tag);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      svg.appendChild(el);
+    }
+    return svg;
+  }
+
+  // Helper: replace <select>/<datalist> options with plain-text options
+  function setOptions(el, options) {
+    el.replaceChildren(
+      ...options.map(([value, label]) => {
+        const opt = document.createElement("option");
+        opt.value = value;
+        if (label !== undefined) opt.textContent = label;
+        return opt;
+      })
+    );
+  }
+
   // Helper: Toast Notifications
   function showToast(message, type = "success") {
     const container = $("toast-container");
@@ -380,11 +407,11 @@
     const btn = el.querySelector(".step-action-btn");
     if (isDone) {
       num.classList.add("done");
-      num.innerHTML = "✓";
+      num.textContent = "✓";
       if (btn) btn.style.display = "none";
     } else {
       num.classList.remove("done");
-      num.innerHTML = stepId.replace("step-", "");
+      num.textContent = stepId.replace("step-", "");
       if (btn) btn.style.display = "inline-flex";
     }
   }
@@ -402,7 +429,7 @@
       : null;
 
     if (!state.posts || state.posts.length === 0) {
-      container.innerHTML = "";
+      container.replaceChildren();
       emptyState.style.display = "block";
       loadMoreBox.style.display = "none";
       return;
@@ -427,8 +454,7 @@
       }
     });
 
-    container.innerHTML = "";
-    container.appendChild(frag);
+    container.replaceChildren(frag);
   }
 
   function createPostCard(post) {
@@ -530,7 +556,10 @@
       previewBox.className = "tg-preview";
       const previewTitle = document.createElement("div");
       previewTitle.className = "tg-preview-title";
-      previewTitle.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg> Так увидят подписчики`;
+      previewTitle.append(
+        svgIcon(12, [["path", { d: "M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" }]]),
+        " Так увидят подписчики"
+      );
       const previewBubble = document.createElement("div");
       previewBubble.className = "tg-bubble";
       previewBubble.textContent = post.text || "";
@@ -625,7 +654,14 @@
         link.target = "_blank";
         link.rel = "noopener noreferrer";
         link.href = `https://t.me/${channelId.replace("@", "")}/${post.tg_message_id}`;
-        link.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg> Открыть в канале`;
+        link.append(
+          svgIcon(14, [
+            ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }],
+            ["polyline", { points: "15 3 21 3 21 9" }],
+            ["line", { x1: "10", y1: "14", x2: "21", y2: "3" }],
+          ]),
+          " Открыть в канале"
+        );
         actions.appendChild(link);
       }
 
@@ -655,7 +691,9 @@
       // Error Banner
       const errBanner = document.createElement("div");
       errBanner.className = "error-banner";
-      errBanner.innerHTML = `<span>⚠️ ${post.error || "Произошла ошибка при обработке поста"}</span>`;
+      const errText = document.createElement("span");
+      errText.textContent = `⚠️ ${post.error || "Произошла ошибка при обработке поста"}`;
+      errBanner.appendChild(errText);
 
       const retryBtn = document.createElement("button");
       retryBtn.className = "btn btn-danger btn-sm";
@@ -684,7 +722,9 @@
       // Skipped Banner
       const skipBanner = document.createElement("div");
       skipBanner.className = "skipped-banner";
-      skipBanner.innerHTML = `<span>🤖 ИИ счёл изменения неинтересными для подписчиков</span>`;
+      const skipText = document.createElement("span");
+      skipText.textContent = "🤖 ИИ счёл изменения неинтересными для подписчиков";
+      skipBanner.appendChild(skipText);
 
       const forceBtn = document.createElement("button");
       forceBtn.className = "btn btn-secondary btn-sm";
@@ -885,16 +925,16 @@
     if (!select) return;
 
     if (!state.has_github_token && !state.github_installation_id) {
-      select.innerHTML = '<option value="">Сначала подключите GitHub</option>';
+      setOptions(select, [["", "Сначала подключите GitHub"]]);
       return;
     }
 
     try {
       const data = await api("/api/repos");
       const repos = Array.isArray(data) ? data : (data.repos || []);
-      select.innerHTML = '<option value="">-- Выберите репозиторий --</option>';
+      setOptions(select, [["", "-- Выберите репозиторий --"]]);
       if (repos.length === 0) {
-        select.innerHTML = '<option value="">Репозитории не найдены (проверьте доступ)</option>';
+        setOptions(select, [["", "Репозитории не найдены (проверьте доступ)"]]);
       } else {
         repos.forEach((r) => {
           const repoName = r.name || r.full_name;
@@ -918,7 +958,7 @@
         }
       };
     } catch (err) {
-      select.innerHTML = `<option value="">Ошибка загрузки: ${err.message}</option>`;
+      setOptions(select, [["", `Ошибка загрузки: ${err.message}`]]);
     }
   }
 
@@ -929,7 +969,7 @@
       info.textContent = `Запомнен: ${username || chatId} (ID: ${chatId})`;
       if (resetBtn) resetBtn.style.display = "inline-flex";
     } else {
-      info.textContent = "Владелец ещё не назначен. Откройте диалог с ботом и нажмите /start";
+      info.textContent = "Владелец ещё не назначен. Нажмите «Получить код» и отправьте его боту";
       if (resetBtn) resetBtn.style.display = "none";
     }
   }
@@ -939,17 +979,10 @@
     const datalist = $("ai-models-list");
     const hint = $("ai-model-hint");
     if (provider === "anthropic") {
-      datalist.innerHTML = `
-        <option value="claude-sonnet-5-5">
-        <option value="claude-haiku-5-5">
-        <option value="claude-opus-5-5">
-      `;
+      setOptions(datalist, [["claude-sonnet-5-5"], ["claude-haiku-5-5"], ["claude-opus-5-5"]]);
       hint.textContent = "Рекомендуемые модели: claude-sonnet-5-5, claude-haiku-5-5";
     } else {
-      datalist.innerHTML = `
-        <option value="gpt-4o">
-        <option value="gpt-4o-mini">
-      `;
+      setOptions(datalist, [["gpt-4o"], ["gpt-4o-mini"]]);
       hint.textContent = "Укажите название модели из вашего кабинета OpenAI (например, gpt-4o)";
     }
   }
@@ -991,8 +1024,9 @@
       const pwInput = $("pw");
       const errBox = $("login-error");
       const submitBtn = $("go");
-      const password = (pwInput?.value || "").trim();
-      if (!password) return;
+      // Пароль отправляется как есть: сервер не обрезает пробелы
+      const password = pwInput?.value || "";
+      if (!password.trim()) return;
 
       withButton(submitBtn, async () => {
         try {
@@ -1225,8 +1259,30 @@
       });
     });
 
+    $("btn-owner-code")?.addEventListener("click", () => {
+      const box = $("owner-code-box");
+      withButton($("btn-owner-code"), async () => {
+        try {
+          const res = await api("/api/telegram/owner-code", { method: "POST" });
+          box.className = "test-result-box active success";
+          box.replaceChildren(`Отправьте боту в личные сообщения: ${res.command} (код действует 15 минут)`);
+          if (res.link) {
+            const a = document.createElement("a");
+            a.href = res.link;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = "Открыть бота";
+            box.append(" ", a);
+          }
+        } catch (err) {
+          box.className = "test-result-box active error";
+          box.textContent = `✗ ${err.message}`;
+        }
+      });
+    });
+
     $("btn-reset-owner")?.addEventListener("click", () => {
-      if (!confirm("Сбросить привязанного владельца? Первый пользователь, написавший /start боту, станет новым владельцем.")) return;
+      if (!confirm("Сбросить привязанного владельца? Новую привязку можно сделать по коду из панели.")) return;
       withButton($("btn-reset-owner"), async () => {
         try {
           await api("/api/test/reset-owner", { method: "POST" });
@@ -1322,7 +1378,7 @@
           $("current_password").value = "";
           $("new_password").value = "";
           $("confirm_password").value = "";
-          showToast("Пароль администратора успешно изменён!");
+          showToast("Пароль изменён. Сессии на других устройствах завершены.");
         } catch (err) {
           showToast(err.message, "error");
         }
