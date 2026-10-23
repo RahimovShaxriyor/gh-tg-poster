@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "2.2",
+  "description": "gh-tg-web: обновление до проверенного коммита (deploy/deploy.sh). Ничего другого не выполняет.",
+  "parameters": {
+    "sha": {
+      "type": "String",
+      "description": "Полный sha коммита из ветки main",
+      "allowedPattern": "^[0-9a-f]{40}$"
+    }
+  },
+  "mainSteps": [
+    {
+      "action": "aws:runShellScript",
+      "name": "deploy",
+      "inputs": {
+        "timeoutSeconds": "900",
+        "runCommand": ["sudo -u deploy -H sh /opt/gh-tg-web/deploy/deploy.sh {{ sha }}"]
+      }
+    }
+  ]
+}
