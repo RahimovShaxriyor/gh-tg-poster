@@ -284,6 +284,7 @@
         appSource: data.github_app_source,
         appBaseUrl: data.github_app_base_url,
         publicUrl: data.public_url,
+        telegram: data.telegram || {},
         installationId: data.github_installation_id,
         accountLogin: data.github_account_login,
         hasGithub: data.has_github_token,
@@ -398,6 +399,7 @@
     document.title = drafts ? `(${drafts}) Анонсы из коммитов` : "Анонсы из коммитов";
 
     renderConn();
+    for (const b of $$("[data-tg-banner]")) b.hidden = !S.loaded || !!S.meta.telegram?.configured;
     if (S.view === "posts") {
       renderStatusLine();
       renderFilters();
@@ -421,9 +423,12 @@
       return { state: "is-ok", title: `${s.repo}, ветка ${s.branch || "main"}`, text: when };
     }
     if (kind === "telegram") {
-      if (s.tg_token_corrupted) return { state: "is-error", title: "Токен бота не расшифровывается", text: "Сменился ENCRYPTION_KEY. Введите токен заново." };
-      if (!s.tg_token_set) return { state: "", title: "Бот не подключён", text: "Добавьте токен бота в настройках." };
-      if (!s.channel_id) return { state: "is-warn", title: "Канал не выбран", text: "Укажите канал или добавьте бота администратором в канал." };
+      const t = S.meta.telegram || {};
+      const bot = t.username ? "@" + t.username : "Бот";
+      if (!t.configured) return { state: "is-error", title: "Бот не настроен", text: "Задайте TG_BOT_TOKEN в .env и перезапустите сервер." };
+      if (t.error) return { state: "is-error", title: "Telegram не принимает токен", text: t.error };
+      if (t.source === "legacy") return { state: "is-warn", title: `${bot}: старый токен из базы`, text: "Добавьте TG_BOT_TOKEN в .env и удалите старое значение в настройках." };
+      if (!s.channel_id) return { state: "is-warn", title: `${bot}: канал не выбран`, text: `Добавьте ${bot} администратором канала с правом публикации или впишите @канал в настройках.` };
       if (!s.tg_owner_chat_id) {
         return { state: "is-warn", title: `Канал ${s.channel_id}`, text: "Вы не привязаны как владелец: черновики в личку и команды /check, /status не работают." };
       }
@@ -594,7 +599,7 @@
     const s = S.settings;
     return [
       { done: S.meta.hasGithub && !!s.repo, text: "GitHub и репозиторий", section: "github" },
-      { done: s.tg_token_set && !!s.channel_id, text: "Бот и канал в Telegram", section: "telegram" },
+      { done: !!S.meta.telegram?.configured && !!s.channel_id, text: "Бот и канал в Telegram", section: "telegram" },
       { done: s.ai_key_set && !!s.ai_model, text: "Ключ и модель ИИ", section: "ai" },
       { done: !!s.tg_owner_chat_id, text: "Привязка владельца к боту", section: "telegram" },
     ];
@@ -1049,7 +1054,7 @@
   // ===== Настройки =====
   const MODELS = {
     anthropic: { list: ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"], hint: "Для коротких постов хватает claude-haiku-5-5: быстрее и дешевле." },
-    openai: { list: ["gpt-4o-mini", "gpt-4o"], hint: "Название модели из кабинета OpenAI." },
+    openai: { list: [], hint: "Название модели из вашего кабинета OpenAI." },
   };
 
   function renderSettings() {
@@ -1068,14 +1073,16 @@
       fillRepoSelect();
     });
 
+    renderTelegramBot();
     fill("telegram", () => {
-      secretField("tg_token", s.tg_token_set, s.tg_token_corrupted);
       $("#channel_id").value = s.channel_id || "";
       $("#tg_notify_drafts").checked = s.tg_notify_drafts === "1";
     });
     $("#owner-status").textContent = s.tg_owner_chat_id
-      ? `${s.tg_owner_username || "Владелец"} (ID ${s.tg_owner_chat_id})`
-      : "Не привязан. Получите код и отправьте его боту в личку.";
+      ? `Привязан: ${s.tg_owner_username || "владелец"} (ID ${s.tg_owner_chat_id})`
+      : "Не привязан.";
+    $("#btn-owner-code").textContent = s.tg_owner_chat_id ? "Сменить" : "Привязать Telegram";
+    $("#btn-owner-code").disabled = !S.meta.telegram?.configured;
     $("#btn-owner-reset").hidden = !s.tg_owner_chat_id;
 
     fill("ai", () => {
@@ -1101,6 +1108,34 @@
 
     const current = location.hash.split("/")[1] || "github";
     for (const a of $$(".settings-link")) a.setAttribute("aria-current", String(a.dataset.section === current));
+  }
+
+  // Раздел Telegram: бот из TG_BOT_TOKEN, его имя (getMe) и старый токен из базы
+  function renderTelegramBot() {
+    const t = S.meta.telegram || {};
+    const bot = t.username ? "@" + t.username : "";
+    let status;
+    let hint = "";
+    if (!t.configured) {
+      status = "Бот не настроен: задайте TG_BOT_TOKEN в .env и перезапустите сервер.";
+      hint = "Токен выдаёт @BotFather командой /newbot.";
+    } else if (t.error) {
+      status = t.error;
+      hint = "Проверьте TG_BOT_TOKEN в .env и перезапустите сервер.";
+    } else if (bot) {
+      status = `Бот ${bot} подключён.`;
+      hint = `Добавьте ${bot} администратором канала с правом публикации.`;
+    } else {
+      status = "Токен задан. Нажмите «Проверить», чтобы узнать имя бота.";
+    }
+    $("#tg-bot-status").textContent = status;
+    $("#tg-bot-hint").textContent = hint;
+    $("#tg-bot-hint").hidden = !hint;
+    $("#tg-legacy").hidden = !t.legacy_token;
+    $("#tg-legacy-text").textContent = t.source === "legacy"
+      ? "Пока TG_BOT_TOKEN не задан, бот работает со старым токеном из базы."
+      : "TG_BOT_TOKEN задан, старое значение из базы не используется.";
+    $("#btn-test-post").disabled = !t.configured;
   }
 
   // Раздел GitHub: «не подключено» → «приложение создано, выберите репозитории» → «подключено»
@@ -1220,7 +1255,7 @@
         if (!ok) return undefined;
       }
     }
-    for (const name of ["github_token", "tg_token", "ai_key"]) {
+    for (const name of ["github_token", "ai_key"]) {
       const input = $("#" + name);
       if (form.contains(input) && !input.disabled && input.value.trim()) payload[name] = input.value.trim();
     }
@@ -1229,7 +1264,7 @@
       try {
         await api("/api/settings", { method: "POST", body: payload });
         S.dirty.delete(section);
-        for (const name of ["github_token", "tg_token", "ai_key"]) if (form.contains($("#" + name))) S.unmasked.delete(name);
+        for (const name of ["github_token", "ai_key"]) if (form.contains($("#" + name))) S.unmasked.delete(name);
         if (section === "github") S.repos = null;
         toast("Сохранено.");
         await loadState();
@@ -1281,7 +1316,10 @@
     }
 
     for (const btn of $$("[data-test]")) {
-      btn.addEventListener("click", () => testConnection(btn.dataset.test, $(`[data-result="${btn.dataset.test}"]`), btn));
+      btn.addEventListener("click", async () => {
+        await testConnection(btn.dataset.test, $(`[data-result="${btn.dataset.test}"]`), btn);
+        if (btn.dataset.test === "telegram") loadState(); // имя бота из свежего getMe
+      });
     }
 
     $("#repo").addEventListener("change", (e) => {
@@ -1303,15 +1341,40 @@
       const box = $("#owner-code");
       try {
         const res = await api("/api/telegram/owner-code", { method: "POST" });
-        box.className = "result is-ok";
-        box.replaceChildren("Отправьте боту в личку: ", h("code", { class: "mono" }, res.command), ". Код действует 15 минут.",
-          res.link ? h("span", {}, " ", h("a", { href: res.link, target: "_blank", rel: "noopener noreferrer" }, "Открыть бота")) : null);
+        box.className = "result";
+        box.replaceChildren(
+          h("p", {}, h("a", { class: "btn btn-primary btn-sm", href: res.link, target: "_blank", rel: "noopener noreferrer" }, `Открыть @${res.username} в Telegram`)),
+          h("p", { class: "hint" }, "В боте нажмите «Запустить» (Start). Или отправьте ему: ", h("code", { class: "mono" }, res.command),
+            `. Код одноразовый и действует ${res.ttl_minutes} минут.`)
+        );
       } catch (err) {
         box.className = "result is-error";
         box.textContent = err.message;
       }
       box.hidden = false;
     }));
+
+    $("#btn-tg-legacy-delete").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const usingLegacy = S.meta.telegram?.source === "legacy";
+      const ok = await confirmDialog({
+        title: "Удалить старый токен бота из базы?",
+        text: usingLegacy
+          ? "Сейчас бот работает именно с ним: после удаления бот выключится, пока вы не зададите TG_BOT_TOKEN в .env и не перезапустите сервер."
+          : "Бот работает с TG_BOT_TOKEN из .env, старое значение больше не нужно.",
+        ok: "Удалить",
+      });
+      if (!ok) return;
+      await busy(btn, async () => {
+        try {
+          const res = await api("/api/telegram/legacy-token/delete", { method: "POST" });
+          toast(res.message);
+          await loadState();
+        } catch (err) {
+          fail(err);
+        }
+      });
+    });
 
     $("#btn-owner-reset").addEventListener("click", async (e) => {
       const btn = e.currentTarget;

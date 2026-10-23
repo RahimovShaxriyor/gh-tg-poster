@@ -357,6 +357,37 @@ kbd {
   gap: var(--s1);
 }
 
+/* Плашка под шапкой: что-то не настроено */
+.banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--line);
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.settings-body > .banner {
+  margin-bottom: var(--s5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.banner .i {
+  color: var(--warn);
+}
+
+.tg-legacy {
+  margin-top: var(--s3);
+}
+
+.tg-legacy p + p {
+  color: var(--text-2);
+}
+
 /* ===== Поповер подключения ===== */
 .popover {
   position: fixed;

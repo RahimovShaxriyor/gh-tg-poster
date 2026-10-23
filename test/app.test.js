@@ -136,12 +136,17 @@ describe("gh-tg-web тесты", () => {
       headers: { cookie },
     });
     assert.equal(stateRes.status, 200);
-    const state = await stateRes.json();
+    const stateText = await stateRes.text();
+    const state = JSON.parse(stateText);
 
     assert.equal(state.settings.repo, "user/cool-project");
     assert.equal(state.settings.github_token_set, true);
-    assert.equal(state.settings.tg_token_set, true);
     assert.equal(state.settings.ai_key_set, true);
+
+    // Токен бота через настройки больше не принимается: он задаётся только TG_BOT_TOKEN в .env
+    assert.equal(testCtx.getRaw("tg_token"), undefined);
+    assert.equal(state.settings.tg_token_set, undefined);
+    assert.equal(stateText.includes("ABC-DEF1234ghIkl"), false);
 
     // Секреты НЕ должны возвращаться
     assert.equal(state.settings.github_token, undefined);

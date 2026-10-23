@@ -85,6 +85,10 @@
       <!-- ПОСТЫ: список слева, выбранный пост справа; на узком экране по очереди -->
       <section class="view view-posts" id="view-posts" aria-label="Посты">
         <div class="list-pane">
+          <div class="banner" data-tg-banner role="status" hidden>
+            <svg class="i" aria-hidden="true"><use href="#i-alert"/></svg>
+            <span>Бот не настроен: задайте TG_BOT_TOKEN в .env и перезапустите сервер.</span>
+          </div>
           <div class="list-head">
             <p class="status-line" id="status-line"><span class="skeleton skeleton-text"></span></p>
             <div class="filters" role="tablist" aria-label="Фильтр постов">
@@ -119,6 +123,10 @@
         </nav>
 
         <div class="settings-body">
+          <div class="banner" data-tg-banner role="status" hidden>
+            <svg class="i" aria-hidden="true"><use href="#i-alert"/></svg>
+            <span>Бот не настроен: задайте TG_BOT_TOKEN в .env и перезапустите сервер.</span>
+          </div>
           <!-- GitHub -->
           <form class="settings-section" id="sec-github" data-section="github" novalidate>
             <h2 class="section-title">GitHub</h2>
@@ -148,7 +156,7 @@
                 <label class="label" for="github_token">Персональный токен GitHub</label>
                 <div class="secret">
                   <input type="password" id="github_token" name="github_token" class="input" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
-                  <button type="button" class="btn btn-secondary btn-sm" data-unmask="github_token" hidden>Заменить</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-unmask="github_token" hidden>Изменить</button>
                 </div>
                 <p class="hint">Fine-grained токен: доступ к одному репозиторию, Contents — Read-only. Используется, только если не подключено приложение GitHub.</p>
               </div>
@@ -175,31 +183,36 @@
           <!-- Telegram -->
           <form class="settings-section" id="sec-telegram" data-section="telegram" novalidate>
             <h2 class="section-title">Telegram</h2>
-            <p class="section-note">Бот публикует посты в канал и присылает вам черновики в личку.</p>
+            <p class="section-note">Бот публикует посты в канал и присылает вам черновики в личку. Бот один на весь сервис, его токен задаётся в .env.</p>
 
             <div class="field">
-              <label class="label" for="tg_token">Токен бота</label>
-              <div class="secret">
-                <input type="password" id="tg_token" name="tg_token" class="input" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
-                <button type="button" class="btn btn-secondary btn-sm" data-unmask="tg_token" hidden>Заменить</button>
+              <span class="label">Бот</span>
+              <p class="field-value" id="tg-bot-status"></p>
+              <p class="hint" id="tg-bot-hint"></p>
+              <div class="notice is-warn tg-legacy" id="tg-legacy" hidden>
+                <svg class="i" aria-hidden="true"><use href="#i-alert"/></svg>
+                <div>
+                  <p>Токен бота перенесён в .env: добавьте TG_BOT_TOKEN и удалите старое значение.</p>
+                  <p id="tg-legacy-text"></p>
+                  <p><button type="button" class="btn btn-secondary btn-sm" id="btn-tg-legacy-delete">Удалить старый токен</button></p>
+                </div>
               </div>
-              <p class="hint">Выдаёт @BotFather командой /newbot.</p>
             </div>
 
             <div class="field">
               <label class="label" for="channel_id">Канал</label>
               <input type="text" id="channel_id" name="channel_id" class="input" autocomplete="off" spellcheck="false" placeholder="@my_channel или -1001234567890">
-              <p class="hint">Бот должен быть администратором канала с правом публикации. Если вы привязаны как владелец и добавите бота в канал сами, поле заполнится автоматически.</p>
+              <p class="hint">Определяется сам, когда вы (привязанный владелец) делаете бота администратором канала. Можно вписать вручную: @канал или числовой ID.</p>
             </div>
 
             <div class="field">
               <span class="label">Владелец бота</span>
               <p class="field-value" id="owner-status"></p>
               <div class="row">
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-owner-code">Получить код привязки</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-owner-code">Привязать Telegram</button>
                 <button type="button" class="btn btn-ghost btn-sm danger-text" id="btn-owner-reset" hidden>Отвязать</button>
               </div>
-              <p class="result" id="owner-code" role="status" hidden></p>
+              <div class="result" id="owner-code" role="status" hidden></div>
               <p class="hint">Владелец получает черновики с кнопками и может писать боту /check и /status. Остальным бот не отвечает.</p>
             </div>
 
@@ -212,13 +225,12 @@
 
             <div class="section-actions">
               <button type="submit" class="btn btn-primary">Сохранить</button>
-              <button type="button" class="btn btn-secondary" data-test="telegram">Проверить подключение</button>
-              <button type="button" class="btn btn-ghost" id="btn-test-post">Отправить тест в канал</button>
+              <button type="button" class="btn btn-secondary" data-test="telegram">Проверить</button>
+              <button type="button" class="btn btn-ghost" id="btn-test-post">Отправить тестовый пост</button>
             </div>
             <p class="result" data-result="telegram" role="status" hidden></p>
           </form>
 
-          <!-- ИИ -->
           <form class="settings-section" id="sec-ai" data-section="ai" novalidate>
             <h2 class="section-title">ИИ</h2>
             <p class="section-note">Пишет текст поста по коммитам и изменениям в коде.</p>
@@ -235,7 +247,7 @@
               <label class="label" for="ai_key">Ключ API</label>
               <div class="secret">
                 <input type="password" id="ai_key" name="ai_key" class="input" autocomplete="off" spellcheck="false" placeholder="sk-…">
-                <button type="button" class="btn btn-secondary btn-sm" data-unmask="ai_key" hidden>Заменить</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-unmask="ai_key" hidden>Изменить</button>
               </div>
             </div>
 
@@ -248,7 +260,7 @@
 
             <div class="section-actions">
               <button type="submit" class="btn btn-primary">Сохранить</button>
-              <button type="button" class="btn btn-secondary" data-test="ai">Проверить подключение</button>
+              <button type="button" class="btn btn-secondary" data-test="ai">Проверить ИИ</button>
             </div>
             <p class="result" data-result="ai" role="status" hidden></p>
           </form>

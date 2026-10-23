@@ -8,7 +8,8 @@ const { gh, tg, deleteWebhook, ai, buildInput, sleep } = require("./lib/services
 const { publish, generate, check, waitIdle } = require("./lib/poster");
 const { createApp } = require("./lib/app");
 const { cleanError } = require("./lib/crypto");
-const { handleUpdate, registerCommands } = require("./lib/telegram-bot");
+const { handleUpdate, registerCommands, refreshBotInfo } = require("./lib/telegram-bot");
+const { botToken, botTokenSource } = require("./lib/notify");
 
 const PASS = process.env.ADMIN_PASSWORD;
 const SECRET = process.env.SESSION_SECRET || PASS;
@@ -79,6 +80,8 @@ const ctx = {
   ADMIN_PASSWORD: PASS,
   SESSION_SECRET: SECRET,
   ENCRYPTION_KEY,
+  // Один бот на весь сервис: токен только из окружения
+  TG_BOT_TOKEN: (process.env.TG_BOT_TOKEN || "").trim(),
   gh,
   tg,
   deleteWebhook,
@@ -123,7 +126,7 @@ async function startTgLoop() {
 
   while (!stopping) {
     try {
-      const token = dbBundle.get("tg_token");
+      const token = botToken(ctx);
       if (!token) {
         await sleep(5000);
         continue;
@@ -190,6 +193,18 @@ function shutdown(server, signal) {
 }
 
 if (require.main === module) {
+  const tgSource = botTokenSource(ctx);
+  if (!tgSource) {
+    console.warn("TG_BOT_TOKEN не задан: бот выключен. Задайте токен от @BotFather в .env и перезапустите сервер.");
+  } else {
+    if (tgSource === "legacy") {
+      console.warn("Используется старый токен бота из базы. Добавьте TG_BOT_TOKEN в .env и удалите старое значение в панели.");
+    }
+    refreshBotInfo(ctx).then((info) => {
+      if (info?.error) console.error("Telegram getMe:", info.error);
+      else if (info) console.log("Бот Telegram: @" + info.username);
+    });
+  }
   startTgLoop().catch((err) => console.error("Ошибка startTgLoop:", cleanError(err.message)));
   setTimeout(() => {
     if (!stopping) check(false, ctx);
