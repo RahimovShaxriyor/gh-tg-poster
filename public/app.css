@@ -817,6 +817,12 @@ kbd {
   font-size: var(--fs-xs);
 }
 
+.cost-hint {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Варианты подачи */
 .variant-tabs {
   display: grid;

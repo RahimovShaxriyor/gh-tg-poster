@@ -332,6 +332,15 @@
             </div>
 
             <div class="field">
+              <label class="label" for="variants">Варианты подачи</label>
+              <select id="variants" name="variants" class="input input-mid">
+                <option value="3">Три варианта: польза, история, вопрос</option>
+                <option value="1">Один вариант (дешевле)</option>
+              </select>
+              <p class="hint">Три варианта пишутся одним запросом, но ответ ИИ длиннее. При одном варианте другие заходы дописываются по кнопке «Другой заход» отдельным запросом.</p>
+            </div>
+
+            <div class="field">
               <label class="label" for="verify_model">Модель для проверки</label>
               <input type="text" id="verify_model" name="verify_model" class="input input-mid" autocomplete="off" spellcheck="false" maxlength="100" placeholder="Та же, что пишет пост">
               <p class="hint">Можно указать более дешёвую модель того же провайдера. Пусто — та же модель.</p>

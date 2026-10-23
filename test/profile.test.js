@@ -53,6 +53,14 @@ describe("Профиль канала: настройки", () => {
     assert.deepEqual(JSON.parse(ctx.get("style_samples")), ["Пост 1", "Пост 2"]);
     assert.equal((await save({ style_samples: "" })).status, 200, "образцы можно очистить");
   });
+
+  it("варианты подачи: по умолчанию три, можно один, другое — ошибка", async () => {
+    const state = await (await fetch(`${base}/api/state`, { headers: { cookie } })).json();
+    assert.equal(state.settings.variants, "3");
+    assert.equal((await save({ variants: "2" })).status, 400);
+    assert.equal((await save({ variants: "1" })).status, 200);
+    assert.equal(ctx.get("variants"), "1");
+  });
 });
 
 describe("Профиль канала в промпте", () => {

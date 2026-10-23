@@ -1003,6 +1003,46 @@
           h("div", { class: "tg-meta" }, h("time", {}, clock(sentAt || new Date())))))));
   }
 
+  // --- Примерная стоимость генерации ---
+  // Цены Anthropic за 1 млн токенов (вход / выход) по README, на 6 октября 2026. Для других моделей — только токены.
+  const PRICES = [[/haiku/i, 0.1, 0.5], [/sonnet/i, 2, 10], [/opus/i, 4, 20]];
+  const tokensOf = (chars) => Math.ceil(chars / 3); // грубо: русский текст и код — около 3 символов на токен
+
+  /**
+   * Оценка по размеру запроса: kind = "full" (факты, заход, текст, проверка) или "rewrite" (текст и проверка).
+   * Без учёта рассуждения модели и возможного переписывания по замечаниям.
+   */
+  function estimate(p, kind) {
+    const s = S.settings;
+    const variants = s.variants === "1" ? 1 : 3;
+    const strict = s.strict_check !== "0";
+    const facts = 400;
+    const profile = tokensOf((s.voice || "").length + (s.tone || "").length + (s.banned_words || "").length) + 120;
+    const samples = tokensOf((s.style_samples || "").length);
+    const memory = 1200; // журнал объявленного и последние посты, в среднем
+    const calls = [];
+    if (kind === "full") {
+      calls.push([900 + tokensOf(String(p.input || "").length + String(p.notes || "").length), facts]);
+      calls.push([700 + facts + profile, 350]);
+      calls.push([1400 + facts + profile + samples + memory, 380 * variants]);
+    } else {
+      calls.push([1400 + facts + profile + samples + memory + 300, 380]);
+    }
+    if (strict) calls.push([600 + facts + 300, 150]);
+    const input = calls.reduce((n, c) => n + c[0], 0);
+    const output = calls.reduce((n, c) => n + c[1], 0);
+    const price = PRICES.find(([re]) => re.test(s.ai_model || ""));
+    const cost = price ? (input * price[1] + output * price[2]) / 1e6 : null;
+    return { calls: calls.length, tokens: input + output, cost };
+  }
+
+  function costHint(p, kind) {
+    const e = estimate(p, kind);
+    const money = e.cost === null ? "" : `, ≈ $${e.cost < 0.01 ? e.cost.toFixed(4) : e.cost.toFixed(2)}`;
+    return h("span", { class: "cost-hint", title: "Оценка по размеру запроса, без учёта рассуждения модели. Если проверка найдёт замечания, будет ещё одно переписывание." },
+      `≈ ${e.tokens.toLocaleString("ru-RU")} токенов${money} · ${e.calls} ${plural(e.calls, "запрос", "запроса", "запросов")}`);
+  }
+
   // --- Варианты подачи: заходы, быстрые кнопки ---
   const ANGLE_STATUS = {
     ok: ["проверен", "is-ok"],
@@ -1044,7 +1084,8 @@
     }
     const row = h("div", { class: "row variant-actions" },
       ...HINTS.map(([hint, label]) => h("button", { type: "button", class: "btn btn-secondary btn-sm", onclick: (e) => doRewrite(p, hint, e.currentTarget) }, label)),
-      angles.length > 1 ? h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: (e) => doNextAngle(p, meta, e.currentTarget) }, "Другой заход") : null);
+      angles.length > 1 ? h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: (e) => doNextAngle(p, meta, e.currentTarget) }, "Другой заход") : null,
+      costHint(p, "rewrite"));
     block.append(row);
     return block;
   }
@@ -1200,6 +1241,7 @@
       publishBtn,
       h("button", { type: "button", class: "btn btn-secondary", onclick: (e) => doRegen(p, e.currentTarget) }, "Другой вариант"),
       h("button", { type: "button", class: "btn btn-secondary", onclick: (e) => doReject(p, e.currentTarget) }, "Отклонить"),
+      costHint(p, "full"),
       h("span", { class: "spacer" }),
       h("button", { type: "button", class: "btn btn-ghost danger-text", onclick: (e) => doDelete(p, e.currentTarget) }, icon("trash"), "Удалить"));
   }
@@ -1224,6 +1266,7 @@
     if (p.status === "rejected") {
       add(h("button", { type: "button", class: "btn btn-secondary", onclick: (e) => doRegen(p, e.currentTarget) }, "Написать заново"));
     }
+    if (["failed", "skipped", "rejected"].includes(p.status)) add(costHint(p, "full"));
     if (p.status !== "sending") {
       add(h("span", { class: "spacer" }));
       add(h("button", { type: "button", class: "btn btn-ghost danger-text", onclick: (e) => doDelete(p, e.currentTarget) }, icon("trash"), "Удалить из истории"));
@@ -1425,6 +1468,7 @@
       secretField("ai_key", s.ai_key_set, s.ai_key_corrupted);
       $("#ai_model").value = s.ai_model || "";
       $("#strict_check").checked = s.strict_check !== "0";
+      $("#variants").value = s.variants === "1" ? "1" : "3";
       $("#strict-risk").hidden = s.strict_check !== "0";
       $("#verify_model").value = s.verify_model || "";
     });
@@ -1758,6 +1802,7 @@
       payload.ai_provider = v("ai_provider");
       payload.ai_model = v("ai_model");
       payload.strict_check = $("#strict_check").checked ? "1" : "0";
+      payload.variants = v("variants");
       payload.verify_model = v("verify_model");
       if (payload.strict_check === "0" && S.settings.strict_check !== "0") {
         const ok = await confirmDialog({
