@@ -1,0 +1,39 @@
+# CI: на каждый push и pull request — тесты, проверка скриптов деплоя и сборка образа.
+# Ничего не публикует и не трогает сервер.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.1"
+          cache: npm
+
+      - name: Зависимости
+        run: npm ci
+
+      - name: Тесты
+        run: npm test
+
+      - name: Проверка скриптов deploy/ (shellcheck)
+        run: shellcheck -x -P SCRIPTDIR -S warning -s sh deploy/*.sh scripts/backup.sh
+
+      - name: Проверка docker-compose.yml
+        run: |
+          cp .env.production.example .env
+          docker compose config --quiet
+
+      - name: Сборка образа (x86)
+        run: docker build --build-arg "APP_VERSION=${GITHUB_SHA::7}" -t gh-tg-web:ci .

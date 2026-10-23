@@ -1,0 +1,69 @@
+# CD: после успешного CI на ветке main — выкладка на сервер AWS.
+# GitHub входит в AWS по OIDC (без долгоживущих ключей), а на сервере через AWS Systems Manager
+# (SSM, без открытого SSH) запускается deploy/deploy.sh с проверенным коммитом.
+# deploy.sh обновляет только код и образ: .env, база в data/, копии в backups/ и сертификаты не трогаются.
+#
+# Пока в репозитории не заданы переменные (Settings → Secrets and variables → Actions → Variables)
+#   AWS_DEPLOY_ROLE_ARN, AWS_REGION, AWS_INSTANCE_ID
+# задание пропускается. Настройка — docs/aws-deploy.md, раздел «CI/CD».
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      vars.AWS_DEPLOY_ROLE_ARN != '' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Окружение production: в настройках репозитория можно включить ручное одобрение каждой выкладки
+    environment: production
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Вход в AWS по OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: deploy/deploy.sh на сервере (через SSM)
+        env:
+          INSTANCE_ID: ${{ vars.AWS_INSTANCE_ID }}
+        run: |
+          set -eu
+          case "$SHA" in *[!0-9a-f]*|"") echo "Некорректный sha: $SHA"; exit 1 ;; esac
+          [ "${#SHA}" -eq 40 ] || { echo "Нужен полный sha из 40 символов"; exit 1; }
+          # Свой документ SSM (deploy/aws/ssm-deploy-document.json) умеет только запустить deploy.sh с sha:
+          # роль GitHub не может выполнить на сервере ничего другого
+          cmd_id=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name GhTgWebDeploy \
+            --comment "gh-tg-web deploy ${SHA:0:7}" \
+            --parameters "sha=$SHA" \
+            --query Command.CommandId --output text)
+          echo "SSM command: $cmd_id"
+          for _ in $(seq 1 180); do
+            sleep 5
+            status=$(aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in Pending|InProgress|Delayed) continue ;; esac
+            break
+          done
+          aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" --query StandardOutputContent --output text
+          aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" --query StandardErrorContent --output text >&2
+          echo "Статус: $status"
+          [ "$status" = Success ]
