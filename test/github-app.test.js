@@ -10,8 +10,9 @@ const {
   installationToken,
   clearInstallationTokenCache,
   verifyInstallation,
-  createAuthState,
-  verifyAuthState,
+  issueState,
+  consumeState,
+  STATE_TTL_MS,
   getInstallationRepos,
   isAppConfigured,
 } = require("../lib/github-app");
@@ -169,26 +170,28 @@ describe("GitHub App интеграция", () => {
   });
 
   // 3. createAuthState() и verifyAuthState()
-  it("createAuthState() и verifyAuthState() формируют подписанный HMAC state с тайм-аутом", () => {
+  it("state для GitHub: подпись HMAC, привязка к сессии и цели, срок 10 минут, одноразовость", () => {
     const secret = "test-session-secret";
-    const state = createAuthState(secret);
-    assert.ok(typeof state === "string");
-    assert.ok(state.includes("."));
+    const opts = { purpose: "install", session: "сессия-А" };
 
-    // Валидный state
-    assert.equal(verifyAuthState(state, secret), true);
+    const state = issueState(testCtx, secret, opts);
+    assert.equal(consumeState(testCtx, secret, state, { purpose: "install", session: "сессия-Б" }).ok, false, "чужая сессия");
+    assert.equal(consumeState(testCtx, secret, state, { purpose: "create", session: "сессия-А" }).ok, false, "другая цель");
+    assert.equal(consumeState(testCtx, "wrong-secret", state, opts).ok, false, "другой секрет");
+    assert.equal(consumeState(testCtx, secret, state + "x", opts).ok, false, "подделка");
+    assert.equal(consumeState(testCtx, secret, state, opts).ok, true, "верный state");
+    const reused = consumeState(testCtx, secret, state, opts);
+    assert.equal(reused.ok, false);
+    assert.match(reused.error, /уже использована/);
 
-    // Неверный secret
-    assert.equal(verifyAuthState(state, "wrong-secret"), false);
-
-    // Подделанный state
-    assert.equal(verifyAuthState(state + "tampered", secret), false);
-
-    // Истёкший state
-    const expiredExp = Date.now() - 5000;
-    const expiredHmac = crypto.createHmac("sha256", secret).update(String(expiredExp)).digest("base64url");
-    const expiredState = `${expiredExp}.${expiredHmac}`;
-    assert.equal(verifyAuthState(expiredState, secret), false);
+    // Истёкший: выпущен «11 минут назад»
+    const realNow = Date.now;
+    Date.now = () => realNow() - STATE_TTL_MS - 60000;
+    const old = issueState(testCtx, secret, opts);
+    Date.now = realNow;
+    const expired = consumeState(testCtx, secret, old, opts);
+    assert.equal(expired.ok, false);
+    assert.match(expired.error, /устарела/);
   });
 
   // 4. Маршрут GET /auth/github/start
@@ -209,14 +212,17 @@ describe("GitHub App интеграция", () => {
     assert.ok(location);
     assert.ok(location.startsWith(`https://github.com/apps/${TEST_APP_SLUG}/installations/new?state=`));
 
+    // state подписан и привязан именно к этой сессии
     const stateParam = new URL(location).searchParams.get("state");
-    assert.ok(verifyAuthState(stateParam, TEST_PASS));
+    const session = cookie.slice(2);
+    assert.equal(consumeState(testCtx, TEST_PASS, stateParam, { purpose: "install", session }).ok, true);
   });
 
   // 5. Маршрут GET /auth/github/setup
   it("GET /auth/github/setup проверяет state, валидирует установку на GitHub и сохраняет в настройки", async () => {
     const cookie = await getAuthCookie();
-    const validState = createAuthState(TEST_PASS);
+    const startRes = await fetch(`${baseUrl}/auth/github/start`, { headers: { cookie }, redirect: "manual" });
+    const validState = new URL(startRes.headers.get("location")).searchParams.get("state");
 
     mockFetchHandler = async (url) => {
       if (url.includes("/app/installations/777888")) {
@@ -249,11 +255,18 @@ describe("GitHub App интеграция", () => {
     assert.equal(okRes.status, 302);
     const loc = okRes.headers.get("location");
     assert.ok(loc.includes("toast=github_connected"));
-    assert.ok(loc.includes("#settings"));
+    assert.ok(loc.includes("#settings/github"));
 
     // Проверяем, что в БД сохранились installation_id и логин
     assert.equal(testCtx.get("github_installation_id"), "777888");
     assert.equal(testCtx.get("github_account_login"), "octocat-org");
+
+    // Тот же state второй раз не принимается
+    const reuseRes = await fetch(`${baseUrl}/auth/github/setup?installation_id=777888&setup_action=install&state=${validState}`, {
+      headers: { cookie },
+      redirect: "manual",
+    });
+    assert.match(decodeURIComponent(reuseRes.headers.get("location")), /уже использована/);
   });
 
   // 6. Список репозиториев GET /api/repos из /installation/repositories с пагинацией

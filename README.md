@@ -85,7 +85,7 @@ sequenceDiagram
 | Force-push: в пост попадают только новые коммиты | Тесты |
 | Повтор при Telegram 429 и временных ошибках ИИ | Тесты |
 | Подключение GitHub по токену | Запуск + тесты |
-| Подключение через GitHub App | Тесты |
+| GitHub в одну кнопку: создание приложения, установка, возврат в панель | Запуск в Chrome (github.com и api.github.com — заглушки) + тесты |
 | ИИ Anthropic и OpenAI | Тесты |
 | Режимы «Публиковать сразу» и «Дайджест раз в день» | Тесты |
 | Панель: правки сохраняются по ходу набора, не теряются при обновлении и истёкшей сессии | Запуск в Chrome |
@@ -93,6 +93,7 @@ sequenceDiagram
 | Вход, ограничение попыток, смена пароля, отзыв сессий | Запуск + тесты |
 | Шифрование токенов в базе | Тесты |
 | Docker-образ: сборка под x86 и ARM, запуск не от root, корректная остановка | Запуск (настоящий Docker) |
+| GitHub в одну кнопку с настоящим GitHub | Не проверено |
 | HTTPS через Caddy | Не проверено |
 | Резервная копия `scripts/backup.sh` | Запуск без Docker; через `docker compose` не проверено |
 | Сброс пароля `scripts/reset-password.js` | Тесты |
@@ -173,36 +174,39 @@ node --env-file=.env server.js
 
 Всё настраивается в панели: **Настройки**. После каждого раздела нажмите «Проверить подключение».
 
-### GitHub: токен
+### GitHub в одну кнопку
 
-Проще всего: [Fine-grained tokens](https://github.com/settings/personal-access-tokens) → Generate new token → Repository access: **Only select repositories** (ваш репозиторий) → Permissions → **Contents: Read-only** (Metadata: Read-only добавится сам). Вставьте токен в **Настройки → GitHub → Токен GitHub**, выберите репозиторий и ветку.
+**Настройки → GitHub → «Подключить GitHub».** Панель сама создаёт для вас приложение GitHub (App Manifest), ничего копировать в `.env` не нужно:
 
-### GitHub: GitHub App (необязательно)
+1. GitHub один раз попросит подтвердить создание приложения. Права у него только на чтение содержимого выбранных репозиториев, вебхука нет.
+2. GitHub откроет страницу установки: отметьте репозиторий с проектом и нажмите **Install**.
+3. Вы вернётесь в панель с надписью «Подключено: ваш логин, доступ к N репозиториям». Выберите репозиторий и ветку, нажмите «Сохранить».
 
-Нужен, если не хотите следить за сроком действия токена.
+Ключ приложения хранится в базе, зашифрованный `ENCRYPTION_KEY`. Наружу через API он не отдаётся. Если `ENCRYPTION_KEY` не задан, панель предупредит об этом перед созданием.
+
+Если на втором шаге закрыть страницу GitHub, в панели останется кнопка «Выбрать репозитории». «Изменить доступ к репозиториям» ведёт в настройки установки на GitHub. «Отключить» стирает у нас установку и ключ, а само приложение удаляется вручную на [github.com/settings/apps](https://github.com/settings/apps).
+
+**Переезд с localhost на сервер.** Адреса, на которые GitHub возвращает после создания и установки, запоминаются в приложении в момент создания. Они берутся из `PUBLIC_URL`, иначе из `DOMAIN` (по умолчанию https), иначе `http://localhost:PORT`. После переезда панель предупредит, что адрес изменился. Тогда нажмите **«Создать приложение заново»**, пройдите те же два шага, а старое приложение удалите на [github.com/settings/apps](https://github.com/settings/apps).
 
 <details>
-<summary>Создание GitHub App</summary>
+<summary>Запасной способ: персональный токен</summary>
 
-1. [GitHub → Settings → Developer settings → GitHub Apps → New GitHub App](https://github.com/settings/apps/new).
-2. Поля:
-   - **GitHub App name** — любое уникальное имя;
-   - **Homepage URL** — `https://poster.example.com`;
-   - **Callback URL** — оставьте пустым;
-   - **Setup URL** — `https://poster.example.com/auth/github/setup`, включите **Redirect on update**;
-   - **Webhook** — снимите **Active**;
-   - **Repository permissions → Contents** — **Read-only**;
-   - **Where can this GitHub App be installed?** — **Only on this account**.
-3. **Create GitHub App**. На странице приложения возьмите **App ID** и slug из ссылки `https://github.com/apps/<slug>`.
-4. **Private keys → Generate a private key**, скачается `.pem`. Переведите его в одну строку: `base64 -w0 key.pem` (Linux) или `base64 -i key.pem` (macOS).
-5. Добавьте в `.env`:
-   ```
-   GITHUB_APP_ID=123456
-   GITHUB_APP_SLUG=ваш-slug
-   GITHUB_APP_PRIVATE_KEY_B64=строка-из-шага-4
-   ```
-   Переменную `GITHUB_APP_PRIVATE_KEY_PATH` в Docker используйте, только если смонтируете файл ключа в контейнер.
-6. `docker compose up -d`, затем в панели **Настройки → GitHub → Подключить через GitHub App** и выберите репозиторий.
+В разделе GitHub раскройте **«Подключить вручную»**. Токен создаётся в [Fine-grained tokens](https://github.com/settings/personal-access-tokens) → Generate new token → Repository access: **Only select repositories** → Permissions → **Contents: Read-only**. Если подключено приложение, токен не используется.
+
+</details>
+
+<details>
+<summary>Запасной способ: своё приложение через .env</summary>
+
+Если приложение GitHub уже создано вручную, его можно задать переменными. Они используются, только когда в панели нет приложения, созданного кнопкой.
+
+```
+GITHUB_APP_ID=123456
+GITHUB_APP_SLUG=ваш-slug
+GITHUB_APP_PRIVATE_KEY_B64=ключ .pem в base64 одной строкой
+```
+
+У приложения должны быть Setup URL `https://ваш-домен/auth/github/setup` с включённым **Redirect on update**, права **Contents: Read-only** и выключенный вебхук. Затем «Подключить GitHub» в панели откроет установку.
 
 </details>
 
@@ -248,7 +252,7 @@ node --env-file=.env server.js
 | Где | Что |
 |---|---|
 | `.env` на сервере | Пароль входа, ключ подписи сессий, ключ шифрования, ключ GitHub App. Права `600`, в git и в Docker-образ не попадает. |
-| `data/app.db` | Настройки, токены GitHub и Telegram, ключ ИИ, история постов, хеш пароля, если вы меняли его в панели. Права `600`. |
+| `data/app.db` | Настройки, токены GitHub и Telegram, ключ ИИ, ключ приложения GitHub, история постов, хеш пароля, если вы меняли его в панели. Права `600`. |
 | `backups/` | Копии `data/app.db`, права `600`. |
 
 - Токены и ключ ИИ в базе зашифрованы AES-256-GCM ключом из `ENCRYPTION_KEY`. Без этой переменной они лежат открытым текстом, и панель об этом предупреждает.
@@ -260,6 +264,7 @@ node --env-file=.env server.js
 **Если что-то утекло**
 
 - **Токен GitHub** — отзовите его в [настройках GitHub](https://github.com/settings/personal-access-tokens), создайте новый, в панели нажмите «Заменить».
+- **Ключ приложения GitHub** — на [github.com/settings/apps](https://github.com/settings/apps) удалите ключ (Private keys) или всё приложение, в панели нажмите «Отключить», затем «Подключить GitHub».
 - **Токен бота** — [@BotFather](https://t.me/BotFather) → `/revoke`, новый токен вставьте в панели. Привязка владельца сохранится.
 - **Ключ ИИ** — удалите его в консоли провайдера и вставьте новый.
 - **Пароль панели** — смените в **Настройки → Безопасность**, все сессии завершатся.
@@ -368,13 +373,14 @@ docker compose up -d --build
 │   ├── services.js            запросы к GitHub, Telegram и ИИ, промпт
 │   ├── telegram-bot.js        команды и кнопки бота, привязка владельца
 │   ├── notify.js              сообщения владельцу: черновики и сбои
-│   ├── github-app.js          GitHub App: JWT, токены установки
+│   ├── github-app.js          GitHub App: создание по манифесту, JWT, токены установки
 │   ├── db.js                  база SQLite, миграции, восстановление после перезапуска
 │   └── crypto.js              шифрование секретов, пароль, cookie сессии
 ├── public/
 │   ├── index.html             разметка панели и SVG-иконки
 │   ├── app.css                стили: светлая и тёмная темы
 │   ├── app.js                 логика панели
+│   ├── github-create.js       отправка формы создания приложения GitHub
 │   └── favicon.svg            иконка вкладки
 ├── scripts/
 │   ├── backup.sh              резервная копия базы

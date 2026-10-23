@@ -279,7 +279,11 @@
       S.meta = {
         domain: data.domain,
         encryption: data.encryption_enabled,
-        appConfigured: data.github_app_configured,
+        appId: data.github_app_id,
+        appSlug: data.github_app_slug,
+        appSource: data.github_app_source,
+        appBaseUrl: data.github_app_base_url,
+        publicUrl: data.public_url,
         installationId: data.github_installation_id,
         accountLogin: data.github_account_login,
         hasGithub: data.has_github_token,
@@ -409,7 +413,8 @@
     const s = S.settings;
     const err = S.status.last_error || "";
     if (kind === "github") {
-      if (!S.meta.hasGithub) return { state: "", title: "GitHub не подключён", text: "Добавьте токен или подключите GitHub App в настройках." };
+      if (!S.meta.hasGithub && S.meta.appId) return { state: "is-warn", title: "Осталось выбрать репозитории", text: "Приложение GitHub создано. В настройках нажмите «Выбрать репозитории»." };
+      if (!S.meta.hasGithub) return { state: "", title: "GitHub не подключён", text: "В настройках нажмите «Подключить GitHub»." };
       if (!s.repo) return { state: "is-warn", title: "Репозиторий не выбран", text: "GitHub подключён. Выберите репозиторий в настройках." };
       if (err) return { state: "is-error", title: "Проверка GitHub не удалась", text: err };
       const when = S.status.last_check ? `Последняя проверка ${relLong(S.status.last_check)}.` : "Проверок ещё не было.";
@@ -1054,13 +1059,10 @@
       if (!S.dirty.has(section)) fn();
     };
 
+    renderGithubConnect();
     fill("github", () => {
-      const appBlock = $("#gh-app-block");
-      appBlock.hidden = !(S.meta.appConfigured || S.meta.installationId);
-      $("#gh-app-off").hidden = !!S.meta.installationId;
-      $("#gh-app-on").hidden = !S.meta.installationId;
-      $("#gh-app-login").textContent = S.meta.accountLogin || "аккаунт GitHub";
-      $("#gh-app-manage").href = `https://github.com/settings/installations/${S.meta.installationId || ""}`;
+      // Ручной токен раскрыт, если он уже используется вместо приложения
+      $("#gh-manual").open = !!s.github_token_set && !S.meta.installationId;
       secretField("github_token", s.github_token_set, s.github_token_corrupted);
       $("#branch").value = s.branch || "main";
       fillRepoSelect();
@@ -1101,6 +1103,43 @@
     for (const a of $$(".settings-link")) a.setAttribute("aria-current", String(a.dataset.section === current));
   }
 
+  // Раздел GitHub: «не подключено» → «приложение создано, выберите репозитории» → «подключено»
+  function renderGithubConnect() {
+    const m = S.meta;
+    const stage = m.installationId ? "connected" : m.appId ? "app" : "none";
+    const show = (id, on) => {
+      $(id).hidden = !on;
+    };
+    show("#gh-connect-btn", stage === "none");
+    show("#gh-install-btn", stage === "app");
+    show("#gh-manage", stage === "connected");
+    show("#gh-recreate", stage !== "none");
+    show("#gh-disconnect", stage !== "none");
+
+    if (stage === "none") {
+      $("#gh-status").textContent = "Не подключено.";
+      $("#gh-hint").textContent = "GitHub попросит один раз подтвердить создание приложения. Права только на чтение выбранных репозиториев.";
+    } else if (stage === "app") {
+      $("#gh-status").textContent = `Приложение «${m.appSlug || m.appId}» создано, осталось выбрать репозитории.`;
+      $("#gh-hint").textContent = "GitHub откроет страницу установки: отметьте репозиторий с проектом и нажмите Install.";
+    } else {
+      const n = Array.isArray(S.repos) ? S.repos.length : null;
+      $("#gh-status").textContent = `Подключено: ${m.accountLogin || "аккаунт GitHub"}` +
+        (n === null ? "." : `, доступ к ${n} ${plural(n, "репозиторию", "репозиториям", "репозиториям")}.`);
+      $("#gh-hint").textContent = m.appSource === "env" ? "Приложение задано переменными GITHUB_APP_* в .env." : "";
+      $("#gh-manage").href = `https://github.com/settings/installations/${m.installationId}`;
+    }
+    $("#gh-hint").hidden = !$("#gh-hint").textContent;
+
+    // Адреса возврата приложения привязаны к адресу панели на момент создания
+    const moved = stage !== "none" && m.appBaseUrl && m.publicUrl && m.appBaseUrl !== m.publicUrl;
+    show("#gh-url-warning", moved);
+    if (moved) {
+      $("#gh-url-warning-text").textContent = `Приложение создано для адреса ${m.appBaseUrl}, а панель сейчас работает на ${m.publicUrl}. ` +
+        "GitHub будет возвращать вас на старый адрес. Нажмите «Создать приложение заново», а старое удалите на github.com/settings/apps.";
+    }
+  }
+
   function secretField(name, isSet, corrupted) {
     const input = $("#" + name);
     const btn = $(`[data-unmask="${name}"]`);
@@ -1131,6 +1170,7 @@
       S.reposError = err.message;
     }
     fillRepoSelect();
+    renderGithubConnect();
   }
 
   function fillRepoSelect() {
@@ -1304,19 +1344,40 @@
       await testConnection("channel-post", $('[data-result="telegram"]'), btn);
     });
 
-    $("#gh-app-disconnect").addEventListener("click", async (e) => {
+    $("#gh-connect-btn").addEventListener("click", async (e) => {
+      if (S.meta.encryption) return;
+      e.preventDefault();
+      const ok = await confirmDialog({
+        title: "Ключ будет храниться без шифрования",
+        text: "ENCRYPTION_KEY не задан, поэтому закрытый ключ приложения GitHub ляжет в базу открытым текстом. Лучше задать ключ в .env и перезапустить сервер.",
+        ok: "Всё равно подключить",
+      });
+      if (ok) location.href = "/auth/github/create";
+    });
+
+    $("#gh-recreate").addEventListener("click", async () => {
+      const ok = await confirmDialog({
+        title: "Создать приложение GitHub заново?",
+        text: "Нужно, если панель переехала на другой адрес. После создания нового приложения текущее подключение заменится. Старое приложение удалите вручную на github.com/settings/apps.",
+        ok: "Создать заново",
+        danger: false,
+      });
+      if (ok) location.href = "/auth/github/create?recreate=1";
+    });
+
+    $("#gh-disconnect").addEventListener("click", async (e) => {
       const btn = e.currentTarget;
       const ok = await confirmDialog({
-        title: "Отключить GitHub App?",
-        text: "Панель перестанет видеть репозитории через приложение. Полностью отозвать доступ можно на странице установки в GitHub.",
+        title: "Отключить GitHub?",
+        text: "Панель забудет установку и ключ приложения и перестанет видеть коммиты. Само приложение останется на GitHub, удалить его можно на github.com/settings/apps.",
         ok: "Отключить",
       });
       if (!ok) return;
       await busy(btn, async () => {
         try {
-          await api("/api/github/disconnect", { method: "POST" });
+          const res = await api("/api/github/disconnect", { method: "POST" });
           S.repos = null;
-          toast("GitHub App отключён.");
+          toast(res.message || "GitHub отключён.");
           await loadState();
         } catch (err) {
           fail(err);
@@ -1348,6 +1409,15 @@
       selectPost(posts[next].id, { replace: !isNarrow() });
       $(`.post-item[data-id="${posts[next].id}"]`)?.scrollIntoView({ block: "nearest" });
     }
+  }
+
+  // После переходов на GitHub сервер возвращает в панель с ?toast=… или ?error=…
+  function showReturnMessage() {
+    const params = new URLSearchParams(location.search);
+    const toasts = { github_connected: "GitHub подключён.", github_updated: "Доступ к репозиториям обновлён." };
+    if (params.get("toast")) toast(toasts[params.get("toast")] || "Готово.");
+    if (params.get("error")) toast(params.get("error"), "error");
+    if (params.has("toast") || params.has("error")) history.replaceState(null, "", location.pathname + location.hash);
   }
 
   // ===== Запуск =====
@@ -1383,6 +1453,7 @@
     window.addEventListener("hashchange", applyRoute);
 
     initSettings();
+    showReturnMessage();
     if (!location.hash) history.replaceState(null, "", "#posts");
     applyRoute();
     loadState().then(() => {

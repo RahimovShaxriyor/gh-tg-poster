@@ -1051,6 +1051,31 @@ kbd {
   gap: var(--s2);
 }
 
+.gh-hint {
+  margin: 0 0 var(--s3);
+}
+
+.gh-url-warning {
+  margin: var(--s3) 0 0;
+}
+
+.manual {
+  margin-bottom: var(--s4);
+}
+
+.manual summary {
+  width: fit-content;
+  margin-bottom: var(--s2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.manual[open] summary {
+  margin-bottom: var(--s3);
+}
+
 .presets {
   margin-top: var(--s2);
 }

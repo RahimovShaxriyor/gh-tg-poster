@@ -122,32 +122,37 @@
           <!-- GitHub -->
           <form class="settings-section" id="sec-github" data-section="github" novalidate>
             <h2 class="section-title">GitHub</h2>
-            <p class="section-note">Откуда брать коммиты. Нужен доступ только на чтение.</p>
+            <p class="section-note">Откуда брать коммиты. Нужен доступ только на чтение выбранных репозиториев.</p>
 
-            <div class="field" id="gh-app-block" hidden>
-              <span class="label">GitHub App</span>
-              <div id="gh-app-off">
-                <a href="/auth/github/start" class="btn btn-secondary" id="gh-app-connect">Подключить через GitHub App</a>
+            <div class="field" id="gh-connect">
+              <span class="label">Подключение</span>
+              <p class="field-value" id="gh-status"></p>
+              <p class="hint gh-hint" id="gh-hint"></p>
+              <div class="row">
+                <a href="/auth/github/create" class="btn btn-primary" id="gh-connect-btn">Подключить GitHub</a>
+                <a href="/auth/github/start" class="btn btn-primary" id="gh-install-btn" hidden>Выбрать репозитории</a>
+                <a href="#" class="btn btn-secondary btn-sm" id="gh-manage" target="_blank" rel="noopener noreferrer" hidden>
+                  Изменить доступ к репозиториям<svg class="i"><use href="#i-external"/></svg>
+                </a>
+                <button type="button" class="btn btn-ghost btn-sm" id="gh-recreate" hidden>Создать приложение заново</button>
+                <button type="button" class="btn btn-ghost btn-sm danger-text" id="gh-disconnect" hidden>Отключить</button>
               </div>
-              <div id="gh-app-on" hidden>
-                <p class="field-value">Подключено: <strong id="gh-app-login"></strong></p>
-                <div class="row">
-                  <a href="#" class="btn btn-secondary btn-sm" id="gh-app-manage" target="_blank" rel="noopener noreferrer">
-                    Доступ к репозиториям<svg class="i"><use href="#i-external"/></svg>
-                  </a>
-                  <button type="button" class="btn btn-ghost btn-sm danger-text" id="gh-app-disconnect">Отключить</button>
+              <div class="notice is-warn gh-url-warning" id="gh-url-warning" hidden>
+                <svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><p id="gh-url-warning-text"></p>
+              </div>
+            </div>
+
+            <details class="manual" id="gh-manual">
+              <summary>Подключить вручную</summary>
+              <div class="field">
+                <label class="label" for="github_token">Персональный токен GitHub</label>
+                <div class="secret">
+                  <input type="password" id="github_token" name="github_token" class="input" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+                  <button type="button" class="btn btn-secondary btn-sm" data-unmask="github_token" hidden>Заменить</button>
                 </div>
+                <p class="hint">Fine-grained токен: доступ к одному репозиторию, Contents — Read-only. Используется, только если не подключено приложение GitHub.</p>
               </div>
-            </div>
-
-            <div class="field" id="gh-token-field">
-              <label class="label" for="github_token">Токен GitHub</label>
-              <div class="secret">
-                <input type="password" id="github_token" name="github_token" class="input" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
-                <button type="button" class="btn btn-secondary btn-sm" data-unmask="github_token" hidden>Заменить</button>
-              </div>
-              <p class="hint">Fine-grained токен: доступ к одному репозиторию, Contents — Read-only. Если подключён GitHub App, токен не используется.</p>
-            </div>
+            </details>
 
             <div class="field">
               <label class="label" for="repo">Репозиторий</label>
