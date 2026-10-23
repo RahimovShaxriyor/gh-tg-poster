@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 220" width="960" height="220" role="img" aria-labelledby="t d">
+  <title id="t">Анонсы из коммитов</title>
+  <desc id="d">Новый коммит в GitHub превращается ИИ в черновик поста, после вашего одобрения он уходит в Telegram-канал.</desc>
+  <style>
+    .bg { fill: #f6f6f3; }
+    .card { fill: #ffffff; stroke: #e2e2dc; }
+    .title { fill: #1c1c1a; font: 600 26px system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    .sub { fill: #55554f; font: 15px system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    .label { fill: #1c1c1a; font: 600 15px system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    .hint { fill: #6b6b64; font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .icon { fill: none; stroke: #0f6b62; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .line { fill: none; stroke: #cfcfc7; stroke-width: 2; }
+    .flow { fill: none; stroke: #0f6b62; stroke-width: 2; stroke-dasharray: 6 14; stroke-linecap: round; animation: flow 1.6s linear infinite; }
+    .ring { fill: none; stroke: #0f6b62; stroke-width: 2; opacity: 0; animation: ping 4.8s ease-out infinite; }
+    .r2 { animation-delay: 1.6s; }
+    .r3 { animation-delay: 3.2s; }
+    @keyframes flow { to { stroke-dashoffset: -40; } }
+    @keyframes ping { 0% { opacity: 0.9; } 30% { opacity: 0; } 100% { opacity: 0; } }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #131312; }
+      .card { fill: #1a1a19; stroke: #2d2d2a; }
+      .title, .label { fill: #ececE7; }
+      .sub { fill: #b4b4ad; }
+      .hint { fill: #96968f; }
+      .icon, .flow, .ring { stroke: #4fb6a8; }
+      .line { stroke: #3d3d39; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .flow, .ring { animation: none; }
+    }
+  </style>
+
+  <rect class="bg" width="960" height="220" rx="12"/>
+  <text class="title" x="40" y="54">Анонсы из коммитов</text>
+  <text class="sub" x="40" y="80">Коммит в GitHub → черновик от ИИ → пост в Telegram-канале по вашей кнопке</text>
+
+  <!-- Линии между шагами: серая основа и бегущий пунктир поверх -->
+  <path class="line" d="M262 152 H392"/>
+  <path class="flow" d="M262 152 H392"/>
+  <path class="line" d="M568 152 H698"/>
+  <path class="flow" d="M568 152 H698"/>
+
+  <!-- 1. Коммит -->
+  <rect class="card" x="40" y="112" width="222" height="80" rx="10"/>
+  <rect class="ring" x="40" y="112" width="222" height="80" rx="10"/>
+  <g class="icon" transform="translate(64 136)"><circle cx="16" cy="16" r="5"/><path d="M2 16h9M21 16h9"/></g>
+  <text class="label" x="112" y="148">Новый коммит</text>
+  <text class="hint" x="112" y="170">feat: экспорт</text>
+
+  <!-- 2. ИИ -->
+  <rect class="card" x="392" y="112" width="176" height="80" rx="10"/>
+  <rect class="ring r2" x="392" y="112" width="176" height="80" rx="10"/>
+  <g class="icon" transform="translate(414 136)"><rect x="8" y="8" width="16" height="16" rx="3"/><path d="M13 3v5M19 3v5M13 24v5M19 24v5M3 13h5M3 19h5M24 13h5M24 19h5"/></g>
+  <text class="label" x="460" y="148">ИИ пишет</text>
+  <text class="hint" x="460" y="170">черновик</text>
+
+  <!-- 3. Telegram -->
+  <rect class="card" x="698" y="112" width="222" height="80" rx="10"/>
+  <rect class="ring r3" x="698" y="112" width="222" height="80" rx="10"/>
+  <g class="icon" transform="translate(722 136)"><path d="M29 3 14 18M29 3 20 29l-6-11L3 12z"/></g>
+  <text class="label" x="770" y="148">Пост в канале</text>
+  <text class="hint" x="770" y="170">по вашей кнопке</text>
+</svg>
