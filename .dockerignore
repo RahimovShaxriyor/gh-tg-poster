@@ -10,3 +10,5 @@ docs
 test
 *.zip
 *.md
+deploy
+.github

@@ -1,12 +1,30 @@
+# Продакшен: один экземпляр, SQLite в ./data, Caddy с HTTPS.
+# Личные данные живут вне образа и вне git: .env, ./data (база), ./backups, том caddy_data (сертификаты).
+# Обновление (deploy/deploy.sh) пересобирает только образ приложения; эти данные не трогает.
+# Не запускайте `docker compose down -v`: флаг -v удалит том с сертификатами Caddy.
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    # Тег образа: deploy.sh перед сборкой сохраняет прежний как gh-tg-web:previous для отката
+    image: gh-tg-web:current
     restart: unless-stopped
     env_file: .env
-    # Папка data на хосте должна принадлежать uid 1000 (пользователь node в контейнере):
-    # sudo chown -R 1000:1000 data
+    # Пользователь контейнера = владелец ./data на хосте (по умолчанию 1000, на сервере — пользователь deploy).
+    # Права: sudo chown -R "$(id -u deploy):$(id -g deploy)" data backups
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     volumes:
       - ./data:/app/data
+    # Корень контейнера только для чтения: приложение пишет лишь в /app/data и /tmp
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 384m
+    pids_limit: 200
     # Время на корректную остановку: сервер дожидается текущей отправки или генерации
     stop_grace_period: 30s
     init: true
@@ -15,14 +33,14 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
   caddy:
-    image: caddy:2
+    image: caddy:2.10
     restart: unless-stopped
     # Caddy нужен только домен, пароли и ключи из .env ему не передаются
     environment:
@@ -34,6 +52,14 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
     logging:
       driver: json-file
       options:
@@ -41,3 +67,4 @@ services:
         max-file: "3"
 volumes:
   caddy_data:
+  caddy_config:

@@ -18,7 +18,10 @@ async function main() {
   await db.backup(target);
   db.close();
 
-  const copy = new Database(target, { readonly: true });
+  // Копия — самостоятельный файл без журнала WAL: рядом не остаются -wal и -shm.
+  // Приложение при открытии само включает WAL снова.
+  const copy = new Database(target);
+  copy.pragma("journal_mode = DELETE");
   const integrity = copy.pragma("integrity_check", { simple: true });
   const posts = copy.prepare("select count(*) as c from posts").get().c;
   copy.close();

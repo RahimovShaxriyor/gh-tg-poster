@@ -1,7 +1,16 @@
+# HTTPS для {$DOMAIN}: Caddy сам получает сертификат Let's Encrypt и перенаправляет http → https.
+# На голый IP-адрес сертификат не выпускается: нужен домен с A-записью на Elastic IP.
+# Caddy — первый узел перед приложением. X-Forwarded-For он выставляет сам по адресу клиента,
+# а входящему заголовку от клиента не доверяет (trusted_proxies не задан). На этом держится
+# ограничение попыток входа в приложении (trust proxy: только частные сети Docker).
 {$DOMAIN} {
-	encode gzip
+	encode zstd gzip
 	header {
-		Strict-Transport-Security "max-age=31536000"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
 		-Server
 	}
 	reverse_proxy app:3000
