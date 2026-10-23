@@ -1034,6 +1034,14 @@
     } else if (meta.angles?.error) {
       block.append(h("p", { class: "hint" }, meta.angles.error));
     }
+    // Остальные варианты проверяются ИИ по требованию: по запросу на вариант
+    const unverified = angles.filter((a) => meta.variants.find((x) => x.angle === a.id)?.check?.status === "unverified");
+    if (unverified.length) {
+      block.append(h("p", { class: "hint variant-unverified" },
+        `Не проверены ИИ: ${unverified.map((a) => a.name).join(", ")}. Выбранный вариант проверяется всегда.`,
+        " ", h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: (e) => doVerifyVariants(p, unverified, e.currentTarget) },
+          `Проверить ${unverified.length === 1 ? "вариант" : "варианты"} (${unverified.length} ${plural(unverified.length, "запрос", "запроса", "запросов")} к ИИ)`)));
+    }
     const row = h("div", { class: "row variant-actions" },
       ...HINTS.map(([hint, label]) => h("button", { type: "button", class: "btn btn-secondary btn-sm", onclick: (e) => doRewrite(p, hint, e.currentTarget) }, label)),
       angles.length > 1 ? h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: (e) => doNextAngle(p, meta, e.currentTarget) }, "Другой заход") : null);
@@ -1069,6 +1077,20 @@
 
   const doVariant = (p, angle, btn) => runVariant(p, btn, `/api/posts/${p.id}/variant`, { angle });
   const doRewrite = (p, hint, btn) => runVariant(p, btn, `/api/posts/${p.id}/rewrite`, { hint }, "Новая версия готова и проверена.");
+
+  async function doVerifyVariants(p, list, btn) {
+    await busy(btn, async () => {
+      for (const a of list) {
+        try {
+          await api(`/api/posts/${p.id}/variant/verify`, { method: "POST", body: { angle: a.id } });
+        } catch (err) {
+          fail(err);
+          break;
+        }
+      }
+      await loadState();
+    });
+  }
 
   // «Другой заход»: следующий ещё не использованный заход; готовый вариант берётся без запроса к ИИ
   async function doNextAngle(p, meta, btn) {

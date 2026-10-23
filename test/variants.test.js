@@ -105,6 +105,36 @@ describe("Варианты подачи: выбор и быстрые кнопк
     assert.equal(ctx.post(id).text, before);
   });
 
+  it("проверка по требованию: невыбранный вариант проверяется ИИ без перегенерации и без смены выбора", async () => {
+    const { ctx, calls, id } = setup({ unsupported: (req, n) => (n === 1 ? [] : [{ quote: "Как мы сделали экспорт", reason: "история не видна в фактах" }]) });
+    await poster.generate(id, true, ctx);
+    calls.length = 0;
+    await poster.variant(id, ctx, { action: "verify", angle: "a2" });
+    assert.deepEqual(calls.map((c) => c.step), ["verify"], "без перегенерации");
+    const meta = JSON.parse(ctx.post(id).meta);
+    assert.equal(meta.selected, 0, "выбор не изменился");
+    assert.equal(meta.variants[1].check.status, "needs_review");
+    assert.equal(meta.variants[1].check.verified, true);
+    assert.equal(ctx.post(id).text, TEXTS[0]);
+    await assert.rejects(() => poster.variant(id, ctx, { action: "verify", angle: "a9" }), /Такого захода нет|ещё не написан/);
+  });
+
+  it("все варианты проходят кодовую проверку сразу; непроверенный ИИ вариант не публикуется (и из бота)", async () => {
+    const { ctx, id } = setup();
+    await poster.generate(id, true, ctx);
+    const meta = JSON.parse(ctx.post(id).meta);
+    assert.ok(meta.variants.every((v) => Array.isArray(v.check.issues) && Array.isArray(v.check.style)), "кодовая проверка у всех");
+    // Подменяем выбор на непроверенный вариант в обход API — публикация должна отказать
+    meta.selected = 1;
+    meta.check = meta.variants[1].check;
+    ctx.db.prepare("update posts set meta=?, text=? where id=?").run(JSON.stringify(meta), TEXTS[1], id);
+    ctx.TG_BOT_TOKEN = "1:a";
+    ctx.set("channel_id", "@chan");
+    ctx.tg = async () => ({ ok: true, result: { message_id: 1 } });
+    await assert.rejects(() => poster.publish(id, null, ctx), /ещё не проверен/);
+    assert.equal(ctx.post(id).status, "draft");
+  });
+
   it("менять варианты можно только у черновика", async () => {
     const { ctx, id } = setup();
     await poster.generate(id, true, ctx);
