@@ -158,7 +158,7 @@ node --env-file=.env server.js
 
 ```mermaid
 flowchart LR
-  push[git push main] --> ci[GitHub Actions: тесты, shellcheck, сборка]
+  push[git push master] --> ci[GitHub Actions: тесты, shellcheck, сборка]
   ci -->|OIDC + SSM| deploy[deploy/deploy.sh на EC2]
   deploy --> backup[копия базы] --> build[сборка образа] --> up[docker compose up] --> health{/health}
   health -->|ok| done[новая версия]
@@ -175,7 +175,7 @@ flowchart LR
 |---|---|
 | Подготовить чистый Ubuntu 24.04 | `sudo sh deploy/bootstrap.sh --ssh-from ВАШ_IP/32`, затем `--harden-ssh` |
 | Сгенерировать секреты для `.env` | `sh deploy/gen-secrets.sh` (печатает один раз) |
-| Обновить до `origin/main` | `sh deploy/deploy.sh` (или само — через CI/CD после push) |
+| Обновить до `origin/master` | `sh deploy/deploy.sh` (или само — через CI/CD после push) |
 | Откатить на прежнюю версию | `sh deploy/rollback.sh` (с базой: `--with-db`) |
 | Резервная копия сейчас | `sh deploy/backup.sh` (по таймеру — ежедневно, `journalctl -u gh-tg-backup`) |
 | Восстановить копию | `sh deploy/restore.sh backups/app_….db.cms --key backup-key.pem` |

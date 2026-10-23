@@ -1,4 +1,4 @@
-# CD: после успешного CI на ветке main — выкладка на сервер AWS.
+# CD: после успешного CI на ветке master — выкладка на сервер AWS.
 # GitHub входит в AWS по OIDC (без долгоживущих ключей), а на сервере через AWS Systems Manager
 # (SSM, без открытого SSH) запускается deploy/deploy.sh с проверенным коммитом.
 # deploy.sh обновляет только код и образ: .env, база в data/, копии в backups/ и сертификаты не трогаются.
@@ -12,7 +12,7 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 permissions:

@@ -51,7 +51,7 @@ main() {
   wait_healthy "${HEALTH_TIMEOUT:-120}" || die "Прежняя версия не стала healthy. Логи: docker compose logs app"
   printf '%s\n' "$PREV_SHA" >"$STATE_DIR/current_sha"
   rm -f "$STATE_DIR/previous_sha"
-  log "Откат выполнен: работает $(git rev-parse --short HEAD). Следующий deploy.sh снова обновит до origin/${DEPLOY_BRANCH:-main}."
+  log "Откат выполнен: работает $(git rev-parse --short HEAD). Следующий deploy.sh снова обновит до origin/${DEPLOY_BRANCH:-master}."
 }
 
 main "$@"

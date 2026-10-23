@@ -19,7 +19,7 @@
 
 ```mermaid
 flowchart LR
-  dev[Ваш компьютер] -->|git push main| gh[GitHub]
+  dev[Ваш компьютер] -->|git push master| gh[GitHub]
   gh --> ci[CI: тесты, shellcheck, сборка]
   ci -->|успех| cd[Deploy: OIDC → AWS]
   cd -->|SSM: только deploy.sh sha| ec2[EC2: deploy.sh]
@@ -28,6 +28,8 @@ flowchart LR
   hc -->|healthy| ok[новая версия]
   hc -->|нет| rb[автооткат на прежний образ и коммит]
 ```
+
+> Рабочая ветка продакшена — **`master`**: из неё выкладывают CI/CD и `deploy/deploy.sh`. Сделайте её веткой по умолчанию на GitHub (Settings → General → Default branch), чтобы pull request и клоны шли от неё.
 
 ## 1. Инстанс EC2
 
@@ -123,7 +125,7 @@ cat ~/.ssh/gh_tg_deploy.pub
 GitHub → репозиторий → Settings → Deploy keys → Add deploy key, вставить ключ, **Allow write access — не отмечать** (только чтение). Затем:
 ```sh
 ssh -T git@github.com   # «Hi RahimovShaxriyor/gh-tg-poster! You've successfully authenticated…»
-git clone git@github.com:RahimovShaxriyor/gh-tg-poster.git /opt/gh-tg-web
+git clone -b master git@github.com:RahimovShaxriyor/gh-tg-poster.git /opt/gh-tg-web
 ```
 Альтернатива — fine-grained токен GitHub с доступом *Contents: Read-only* только к этому репозиторию; хранить его в `~/.git-credentials` с правами 600.
 
@@ -163,7 +165,7 @@ sqlite3 check.db 'PRAGMA integrity_check;'   # ok
 
 ## 10. CI/CD: обновление из GitHub
 
-После настройки каждое изменение в `main` проходит CI (тесты, shellcheck, сборка) и само выкладывается на сервер. Пока переменные не заданы, шаг выкладки пропускается — обновлять можно вручную (`sh deploy/deploy.sh`).
+После настройки каждое изменение в `master` проходит CI (тесты, shellcheck, сборка) и само выкладывается на сервер. Пока переменные не заданы, шаг выкладки пропускается — обновлять можно вручную (`sh deploy/deploy.sh`).
 
 1. **OIDC-провайдер GitHub в AWS** (один раз): IAM → Identity providers → Add provider → OpenID Connect, URL `https://token.actions.githubusercontent.com`, Audience `sts.amazonaws.com`.
 2. **Документ SSM**, который умеет только запустить `deploy.sh` с sha: Systems Manager → Documents → Create document → Command, имя `GhTgWebDeploy`, содержимое — [`deploy/aws/ssm-deploy-document.json`](../deploy/aws/ssm-deploy-document.json). Или:
@@ -175,13 +177,13 @@ sqlite3 check.db 'PRAGMA integrity_check;'   # ok
 5. **Settings → Secrets and variables → Actions → Variables**: `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION`, `AWS_INSTANCE_ID`. Ключей AWS в GitHub не хранится.
 6. Проверка: Actions → Deploy → *Run workflow*. В логе — вывод `deploy.sh` с сервера.
 
-Как это работает: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml). Выкладывается **ровно тот коммит, который прошёл CI**; `deploy.sh` проверяет, что он есть в `origin/main`, и обновляется только fast-forward.
+Как это работает: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml). Выкладывается **ровно тот коммит, который прошёл CI**; `deploy.sh` проверяет, что он есть в `origin/master`, и обновляется только fast-forward.
 
 ## 11. Обновление, откат, восстановление вручную
 
 ```sh
 sudo -iu deploy && cd /opt/gh-tg-web
-sh deploy/deploy.sh                # обновиться до origin/main (копия базы → сборка → /health → иначе откат)
+sh deploy/deploy.sh                # обновиться до origin/master (копия базы → сборка → /health → иначе откат)
 sh deploy/rollback.sh              # вернуться на предыдущую версию (код и образ)
 sh deploy/rollback.sh --with-db    # и базу из копии перед последним обновлением
 sh deploy/restore.sh backups/app_….db.cms --key /tmp/backup-key.pem   # восстановить копию (ключ потом удалить: shred -u)
@@ -225,6 +227,6 @@ sh deploy/check.sh                 # диск, память, контейнер�
 - [ ] Настоящий IP клиента в приложении: 5 неверных паролей с вашего адреса → шестой запрос получает 429 (локально проверено через Caddy, на сервере — проверить).
 - [ ] Таймер копий: `systemctl list-timers gh-tg-backup.timer`, на следующий день — новый файл в `backups/` и запись в `journalctl -u gh-tg-backup`.
 - [ ] Выгрузка в S3 с ролью инстанса (`S3_BUCKET` в `deploy/deploy.env`).
-- [ ] CI/CD: OIDC → роль → документ SSM → `deploy.sh`; выкладка по *Run workflow* и после push в `main`.
+- [ ] CI/CD: OIDC → роль → документ SSM → `deploy.sh`; выкладка по *Run workflow* и после push в `master`.
 - [ ] Session Manager подключается (агент SSM есть в образах Ubuntu от Canonical; проверьте `snap list amazon-ssm-agent`).
 - [ ] Перезапуск инстанса: после него приложение поднимается само (`restart: unless-stopped`), пауза бота сохраняется.

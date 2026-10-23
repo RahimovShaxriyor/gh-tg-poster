@@ -20,7 +20,7 @@ main() {
   load_config
   cd "$APP_DIR"
 
-  BRANCH="${DEPLOY_BRANCH:-main}"
+  BRANCH="${DEPLOY_BRANCH:-master}"
   TARGET="${1:-}"
   require_env_file
   acquire_lock
