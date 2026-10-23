@@ -817,6 +817,80 @@ kbd {
   font-size: var(--fs-xs);
 }
 
+/* Варианты подачи */
+.variant-tabs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+
+.variant-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.variant-tab:hover {
+  border-color: var(--accent);
+}
+
+.variant-tab[aria-selected="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  cursor: default;
+}
+
+.variant-name {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.variant-hook {
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.variant-status {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.variant-status.is-ok {
+  color: var(--ok);
+}
+
+.variant-status.is-warn {
+  color: var(--warn);
+}
+
+.variant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.variants-focus {
+  margin: 0 0 var(--s2);
+}
+
+.mark-style {
+  text-decoration: underline dashed var(--text-3);
+  text-underline-offset: 3px;
+}
+
 /* Проверка точности */
 .accuracy-status {
   margin: 0 0 var(--s2);

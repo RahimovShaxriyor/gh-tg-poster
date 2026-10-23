@@ -717,6 +717,7 @@
 
     const meta = postMeta(p);
     if (p.status === "draft") {
+      if (meta?.variants?.length) root.append(variantsBlock(p, meta));
       root.append(editorBlock(p));
       root.append(previewBlock(p, () => currentText(p)));
       if (meta) root.append(accuracyBlock(p, meta));
@@ -967,6 +968,7 @@
     const meta = postMeta(p);
     if (!meta) return [];
     const marks = (meta.check?.issues || []).map((i) => ({ quote: i.quote, cls: "mark-issue", title: "Не подтверждено: " + i.reason, all: true }));
+    for (const i of meta.check?.style || []) if (i.kind === "jargon" || i.kind === "banned") marks.push({ quote: i.quote, cls: "mark-style", title: "Подача: " + i.reason, all: true });
     for (const sn of meta.sentences || []) marks.push({ quote: sn.quote, cls: "src-sent", title: sourcesText(meta, sn.facts) });
     return marks;
   }
@@ -1001,6 +1003,89 @@
           h("div", { class: "tg-meta" }, h("time", {}, clock(sentAt || new Date())))))));
   }
 
+  // --- Варианты подачи: заходы, быстрые кнопки ---
+  const ANGLE_STATUS = {
+    ok: ["проверен", "is-ok"],
+    needs_review: ["есть замечания", "is-warn"],
+    unverified: ["не проверен ИИ", ""],
+    off: ["", ""],
+  };
+  const HINTS = [["brighter", "Ярче"], ["simpler", "Проще"], ["shorter", "Короче"], ["benefit", "Больше пользы"]];
+
+  function variantsBlock(p, meta) {
+    const angles = meta.angles?.list || [];
+    const block = h("section", { class: "block variants", "aria-label": "Варианты подачи" }, h("h2", { class: "block-title" }, "Заход"));
+    if (meta.angles?.focus) block.append(h("p", { class: "hint variants-focus" }, "Главное для читателя: " + meta.angles.focus));
+    if (angles.length > 1) {
+      const list = h("div", { class: "variant-tabs", role: "tablist", "aria-label": "Заходы" });
+      for (const a of angles) {
+        const v = meta.variants.find((x) => x.angle === a.id);
+        const selected = meta.angle === a.id;
+        const [label, cls] = v ? ANGLE_STATUS[v.check?.status] || ["", ""] : ["ещё не написан", ""];
+        list.append(h("button", {
+          type: "button", role: "tab", class: "variant-tab", "aria-selected": String(selected), title: a.idea || null,
+          onclick: (e) => (selected ? null : doVariant(p, a.id, e.currentTarget)),
+        },
+        h("span", { class: "variant-name" }, a.name),
+        h("span", { class: "variant-hook" }, (v ? v.text.split("\n")[0] : a.hook) || a.hook),
+        label ? h("span", { class: "variant-status " + cls }, label) : null));
+      }
+      block.append(list);
+    } else if (meta.angles?.error) {
+      block.append(h("p", { class: "hint" }, meta.angles.error));
+    }
+    const row = h("div", { class: "row variant-actions" },
+      ...HINTS.map(([hint, label]) => h("button", { type: "button", class: "btn btn-secondary btn-sm", onclick: (e) => doRewrite(p, hint, e.currentTarget) }, label)),
+      angles.length > 1 ? h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: (e) => doNextAngle(p, meta, e.currentTarget) }, "Другой заход") : null);
+    block.append(row);
+    return block;
+  }
+
+  // Правки в редакторе пропадут при смене текста: спрашиваем
+  async function confirmReplace(p) {
+    if (S.drafts[p.id] === undefined && !($("#editor") && $("#editor").value !== (p.text || ""))) return true;
+    return confirmDialog({ title: "Заменить текст?", text: "Другой вариант заменит ваши правки.", ok: "Заменить" });
+  }
+
+  async function runVariant(p, btn, path, body, done) {
+    if (!(await confirmReplace(p))) return;
+    clearTimeout(S.saveTimers[p.id]);
+    delete S.drafts[p.id];
+    persistDrafts();
+    await busy(btn, async () => {
+      S.pendingRegen.add(p.id);
+      renderDetail();
+      try {
+        await api(path, { method: "POST", body });
+        if (done) toast(done);
+      } catch (err) {
+        fail(err);
+      } finally {
+        S.pendingRegen.delete(p.id);
+      }
+      await loadState();
+    });
+  }
+
+  const doVariant = (p, angle, btn) => runVariant(p, btn, `/api/posts/${p.id}/variant`, { angle });
+  const doRewrite = (p, hint, btn) => runVariant(p, btn, `/api/posts/${p.id}/rewrite`, { hint }, "Новая версия готова и проверена.");
+
+  // «Другой заход»: следующий ещё не использованный заход; готовый вариант берётся без запроса к ИИ
+  async function doNextAngle(p, meta, btn) {
+    const angles = meta.angles?.list || [];
+    const tried = new Set(meta.tried || []);
+    const start = Math.max(0, angles.findIndex((a) => a.id === meta.angle));
+    const next = [...angles.slice(start + 1), ...angles.slice(0, start)].find((a) => !tried.has(a.id));
+    if (next) return doVariant(p, next.id, btn);
+    const ok = await confirmDialog({
+      title: "Все заходы уже были",
+      text: "Написать пост заново: ИИ заново выпишет факты и предложит новые заходы. Это полный запрос к ИИ.",
+      ok: "Написать заново",
+      danger: false,
+    });
+    if (ok) doRegen(p, btn, { confirmed: true });
+  }
+
   // --- Проверка точности ---
   const EXCLUDE_REASONS = {
     unclear: "неясно из коммитов, ИИ не стал упоминать",
@@ -1031,6 +1116,11 @@
       block.append(h("p", { class: "hint" }, "Текст правили после проверки: правки не проверялись."));
     }
 
+    const style = check.style || [];
+    if (style.length) {
+      block.append(line("is-warn", "Подача: " + style.length + " " + plural(style.length, "замечание", "замечания", "замечаний") + " (на точность не влияет)."));
+      block.append(h("ul", { class: "issues" }, style.map((i) => h("li", {}, h("span", { class: "mark-style" }, i.quote), " — ", i.reason))));
+    }
     if (issues.length) {
       block.append(h("ul", { class: "issues" }, issues.map((i) => h("li", {},
         h("span", { class: "mark-issue" }, i.quote), " — ", i.reason,
@@ -1184,8 +1274,8 @@
     });
   }
 
-  async function doRegen(p, btn) {
-    if (S.drafts[p.id] !== undefined || (p.status === "draft" && $("#editor") && $("#editor").value !== (p.text || ""))) {
+  async function doRegen(p, btn, { confirmed = false } = {}) {
+    if (!confirmed && (S.drafts[p.id] !== undefined || (p.status === "draft" && $("#editor") && $("#editor").value !== (p.text || "")))) {
       const ok = await confirmDialog({ title: "Заменить текст?", text: "Новый вариант заменит ваши правки.", ok: "Заменить" });
       if (!ok) return;
     }
