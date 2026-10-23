@@ -1,13 +1,28 @@
-# CI: на каждый push и pull request — тесты, проверка скриптов деплоя и сборка образа.
-# Ничего не публикует и не трогает сервер.
-name: CI
+# CI/CD в одном workflow, чтобы выкладка зависела от тестов того же коммита:
+#   test   — на каждый push и pull request: тесты, shellcheck скриптов deploy/, compose config, сборка образа;
+#   deploy — ТОЛЬКО после успешного test (needs: test) и ТОЛЬКО для push в master этого репозитория
+#            или ручного запуска на master (тесты при этом тоже идут первыми).
+# Pull request, другие ветки и форки сервер не трогают никогда.
+#
+# deploy входит в AWS по OIDC (без ключей в GitHub) и через SSM запускает на сервере документ
+# GhTgWebDeploy: он умеет только deploy/deploy.sh <sha>. deploy.sh обновляет код и образ, проверяет
+# /health и при неудаче сам откатывается; .env, база в data/, копии и сертификаты не трогаются.
+# Пока не заданы переменные AWS_DEPLOY_ROLE_ARN, AWS_REGION, AWS_INSTANCE_ID — deploy пропускается.
+name: CI/CD
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# Новый push в ту же ветку отменяет недоделанную проверку старого коммита. На master — нет:
+# иначе отменилась бы и идущая выкладка (запуски на master просто идут друг за другом)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
   test:
@@ -37,3 +52,57 @@ jobs:
 
       - name: Сборка образа (x86)
         run: docker build --build-arg "APP_VERSION=${GITHUB_SHA::7}" -t gh-tg-web:ci .
+
+  deploy:
+    needs: test
+    if: >-
+      github.ref == 'refs/heads/master' &&
+      github.repository == 'RahimovShaxriyor/gh-tg-poster' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Окружение production: в настройках репозитория можно потребовать ручное одобрение каждой выкладки
+    environment: production
+    # Выкладки идут строго по одной и не прерываются новым push: deploy.sh доводит обновление или откат до конца
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Вход в AWS по OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: deploy/deploy.sh на сервере (через SSM), коммит — тот же, что прошёл тесты
+        env:
+          INSTANCE_ID: ${{ vars.AWS_INSTANCE_ID }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          case "$SHA" in *[!0-9a-f]*|"") echo "Некорректный sha: $SHA"; exit 1 ;; esac
+          [ "${#SHA}" -eq 40 ] || { echo "Нужен полный sha из 40 символов"; exit 1; }
+          # Свой документ SSM (deploy/aws/ssm-deploy-document.json) умеет только запустить deploy.sh с sha:
+          # роль GitHub не может выполнить на сервере ничего другого
+          cmd_id=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name GhTgWebDeploy \
+            --comment "gh-tg-web deploy ${SHA:0:7}" \
+            --parameters "sha=$SHA" \
+            --query Command.CommandId --output text)
+          echo "SSM command: $cmd_id"
+          status=Pending
+          for _ in $(seq 1 180); do
+            sleep 5
+            status=$(aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in Pending|InProgress|Delayed) continue ;; esac
+            break
+          done
+          aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" --query StandardOutputContent --output text || true
+          aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCE_ID" --query StandardErrorContent --output text >&2 || true
+          echo "Статус: $status"
+          [ "$status" = Success ]

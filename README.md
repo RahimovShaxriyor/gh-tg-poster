@@ -110,7 +110,7 @@ sequenceDiagram
 | GitHub в одну кнопку с настоящим GitHub | Не проверено |
 | Caddy: редирект на HTTPS, заголовки, сжатие, настоящий IP для ограничения входа | Запуск локально (сертификат Caddy для localhost); с Let's Encrypt и доменом не проверено |
 | `deploy/backup.sh` (шифрование), `restore.sh` (integrity_check), `deploy.sh` (автооткат), `rollback.sh`, `check.sh` | Запуск локально на имитации сервера (git-origin, Docker Compose) |
-| `deploy/bootstrap.sh`, таймер systemd, выгрузка в S3, CI/CD через OIDC и SSM | Не проверено: нужны Ubuntu 24.04 на EC2 и AWS (синтаксис, shellcheck и actionlint пройдены) |
+| `deploy/bootstrap.sh`, таймер systemd, выгрузка в S3, CI/CD (deploy после test) через OIDC и SSM | Не проверено: нужны Ubuntu 24.04 на EC2 и AWS (синтаксис, shellcheck и actionlint пройдены) |
 | Сброс пароля `scripts/reset-password.js` | Тесты |
 | Развёртывание на AWS EC2 по docs/aws-deploy.md | Не проверено |
 
@@ -158,8 +158,9 @@ node --env-file=.env server.js
 
 ```mermaid
 flowchart LR
-  push[git push master] --> ci[GitHub Actions: тесты, shellcheck, сборка]
-  ci -->|OIDC + SSM| deploy[deploy/deploy.sh на EC2]
+  push[git push master] --> ci[GitHub Actions: test — тесты, shellcheck, сборка]
+  ci -->|тесты прошли: OIDC + SSM| deploy[deploy/deploy.sh на EC2]
+  ci -->|тесты упали| keep[выкладки нет]
   deploy --> backup[копия базы] --> build[сборка образа] --> up[docker compose up] --> health{/health}
   health -->|ok| done[новая версия]
   health -->|нет| rollback[автооткат]
@@ -168,6 +169,8 @@ flowchart LR
     app --> data[(data/app.db)]
   end
 ```
+
+На сервер попадает только коммит, у которого прошли тесты: задание deploy в GitHub Actions зависит от test того же коммита (`needs: test`). Упали тесты — выкладки нет, бот работает на прежней версии.
 
 Обновление трогает только код и образ. `.env`, база в `data/`, копии в `backups/`, `deploy/deploy.env` и сертификаты (том `caddy_data`) не входят в git и при обновлении не меняются. Перед каждым обновлением снимается копия базы.
 
@@ -472,7 +475,7 @@ GITHUB_APP_PRIVATE_KEY_B64=ключ .pem в base64 одной строкой
 │   ├── github-create.js       отправка формы создания приложения GitHub
 │   └── favicon.svg            иконка вкладки
 ├── deploy/                    продакшен: bootstrap, deploy, rollback, backup, restore, check, gen-secrets, systemd, aws/
-├── .github/workflows/         CI (тесты, shellcheck, сборка) и CD (выкладка через OIDC и SSM)
+├── .github/workflows/ci.yml   CI/CD: test на каждый push; deploy только после успешного test на master
 ├── scripts/
 │   ├── backup.sh              резервная копия базы
 │   ├── backup-db.js           копия средствами SQLite с проверкой

@@ -21,7 +21,8 @@
 flowchart LR
   dev[Ваш компьютер] -->|git push master| gh[GitHub]
   gh --> ci[CI: тесты, shellcheck, сборка]
-  ci -->|успех| cd[Deploy: OIDC → AWS]
+  ci -->|тесты прошли| cd[deploy: OIDC → AWS]
+  ci -->|тесты упали| stop[выкладки нет, работает прежняя версия]
   cd -->|SSM: только deploy.sh sha| ec2[EC2: deploy.sh]
   ec2 -->|git fetch по deploy key| gh
   ec2 --> bk[копия базы] --> build[сборка образа] --> up[запуск] --> hc{/health}
@@ -165,7 +166,14 @@ sqlite3 check.db 'PRAGMA integrity_check;'   # ok
 
 ## 10. CI/CD: обновление из GitHub
 
-После настройки каждое изменение в `master` проходит CI (тесты, shellcheck, сборка) и само выкладывается на сервер. Пока переменные не заданы, шаг выкладки пропускается — обновлять можно вручную (`sh deploy/deploy.sh`).
+Один workflow [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) с двумя заданиями:
+
+- **test** — на каждый push и pull request: `npm test`, shellcheck скриптов, `docker compose config`, сборка образа;
+- **deploy** — `needs: test`: запускается **только если test этого же коммита прошёл успешно**, и только для push в `master` этого репозитория (или ручного *Run workflow* на `master` — тесты при этом тоже идут первыми). Pull request, другие ветки и форки сервер не трогают.
+
+Если тесты упали, выкладки нет — на сервере продолжает работать прежняя версия, бот не прерывается. Если тесты прошли, но новая версия не поднялась на сервере, `deploy.sh` сам откатывается на прежнюю. Выкладки идут строго по одной, новый push не прерывает идущую.
+
+Пока переменные AWS не заданы, задание deploy пропускается — обновлять можно вручную (`sh deploy/deploy.sh`).
 
 1. **OIDC-провайдер GitHub в AWS** (один раз): IAM → Identity providers → Add provider → OpenID Connect, URL `https://token.actions.githubusercontent.com`, Audience `sts.amazonaws.com`.
 2. **Документ SSM**, который умеет только запустить `deploy.sh` с sha: Systems Manager → Documents → Create document → Command, имя `GhTgWebDeploy`, содержимое — [`deploy/aws/ssm-deploy-document.json`](../deploy/aws/ssm-deploy-document.json). Или:
@@ -175,9 +183,10 @@ sqlite3 check.db 'PRAGMA integrity_check;'   # ok
 3. **Роль для GitHub**: IAM → Roles → Create role → *Web identity*, провайдер из п. 1. Доверие — [`deploy/aws/github-oidc-trust.json`](../deploy/aws/github-oidc-trust.json) (подставьте `ACCOUNT_ID`; роль принимается только из окружения `production` этого репозитория). Права — [`deploy/aws/github-deploy-policy.json`](../deploy/aws/github-deploy-policy.json): запуск только документа `GhTgWebDeploy` только на вашем инстансе.
 4. **GitHub → Settings → Environments → New environment `production`**. Можно включить *Required reviewers* — тогда каждая выкладка ждёт вашего подтверждения.
 5. **Settings → Secrets and variables → Actions → Variables**: `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION`, `AWS_INSTANCE_ID`. Ключей AWS в GitHub не хранится.
-6. Проверка: Actions → Deploy → *Run workflow*. В логе — вывод `deploy.sh` с сервера.
+6. **Защита ветки** (рекомендую): Settings → Branches → Add rule для `master` → *Require status checks to pass before merging* → отметить проверку **test**. Тогда в `master` через pull request не попадёт код с упавшими тестами.
+7. Проверка: Actions → **CI/CD** → *Run workflow* (ветка `master`). Сначала пройдёт test, потом deploy; в логе deploy — вывод `deploy.sh` с сервера.
 
-Как это работает: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml). Выкладывается **ровно тот коммит, который прошёл CI**; `deploy.sh` проверяет, что он есть в `origin/master`, и обновляется только fast-forward.
+Выкладывается **ровно тот коммит, который прошёл тесты** (`github.sha` того же запуска); `deploy.sh` проверяет, что он есть в `origin/master`, и обновляется только fast-forward.
 
 ## 11. Обновление, откат, восстановление вручную
 
