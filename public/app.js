@@ -214,7 +214,7 @@
       state.encryption_enabled = Boolean(data.encryption_enabled);
       state.domain = data.domain || "";
       state.debounce_until = data.debounce_until || null;
-      state.next_poll_in = data.next_poll_in ?? 5;
+      state.next_poll_in = data.next_poll_in ?? null;
 
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.get("toast") === "github_connected") {
@@ -345,8 +345,8 @@
     $("sum-sent-today").textContent = sentToday;
 
     // Next poll
-    const nextPoll = state.next_poll_in ?? 5;
-    $("sum-next-poll").textContent = `${nextPoll} мин`;
+    const nextPoll = state.next_poll_in;
+    $("sum-next-poll").textContent = nextPoll === null ? "—" : nextPoll === 0 ? "меньше минуты" : `${nextPoll} мин`;
 
     // Debounce pause
     if (state.debounce_until) {
@@ -507,6 +507,16 @@
       if (post.input) parsedInput = JSON.parse(post.input);
     } catch (e) {
       // not JSON
+    }
+
+    // Отправка прервалась перезапуском сервера: пост мог уже дойти до канала
+    if (post.interrupted && post.status !== "sent") {
+      const hint = document.createElement("div");
+      hint.className = "error-banner";
+      const hintText = document.createElement("span");
+      hintText.textContent = "⚠️ Отправка этого поста прервалась перезапуском сервера. Он мог уже появиться в канале: проверьте канал, прежде чем отправлять повторно.";
+      hint.appendChild(hintText);
+      body.appendChild(hint);
     }
 
     if (post.status === "draft") {
@@ -692,13 +702,18 @@
       const errBanner = document.createElement("div");
       errBanner.className = "error-banner";
       const errText = document.createElement("span");
-      errText.textContent = `⚠️ ${post.error || "Произошла ошибка при обработке поста"}`;
+      // Для прерванной отправки причина уже показана подсказкой выше
+      const errMsg = post.interrupted && String(post.error || "").startsWith("Отправка прервана")
+        ? "Отправка не завершена"
+        : post.error || "Произошла ошибка при обработке поста";
+      errText.textContent = `⚠️ ${errMsg}`;
       errBanner.appendChild(errText);
 
       const retryBtn = document.createElement("button");
       retryBtn.className = "btn btn-danger btn-sm";
       retryBtn.textContent = "Повторить";
       retryBtn.addEventListener("click", () => {
+        if (post.interrupted && !confirm("Вы проверили канал и поста там нет? Повторная отправка может создать дубль.")) return;
         withButton(retryBtn, async () => {
           try {
             await api(`/api/posts/${post.id}/publish`, { method: "POST" });
@@ -833,7 +848,9 @@
     const mode = s.mode || "approve";
     $("mode").value = mode;
     $("poll_interval").value = s.poll_interval || "5";
-    $("debounce_pause").value = s.debounce_pause || "10";
+    $("debounce").value = s.debounce || "10";
+    $("digest_time").value = s.digest_time || "18:00";
+    $("digest_tz").value = s.digest_tz || "Europe/Moscow";
     $("tone").value = s.tone || "";
     $("tg_notify_drafts").checked = s.tg_notify_drafts === "1";
     updateDigestFieldsVisibility(mode);
@@ -1010,7 +1027,7 @@
     $("btn-header-check").addEventListener("click", () => {
       withButton($("btn-header-check"), async () => {
         try {
-          const res = await api("/api/check?force=1", { method: "POST" });
+          const res = await api("/api/check", { method: "POST" });
           showToast(res.message || "Проверка запущена");
           await loadState();
         } catch (err) {
@@ -1239,7 +1256,7 @@
         try {
           const res = await api("/api/test/telegram", { method: "POST" });
           resBox.className = "test-result-box active success";
-          resBox.textContent = `✓ Бот @${res.bot || "бот"}${res.channel ? `, администратор канала ${res.channel}` : ""}`;
+          resBox.textContent = `✓ ${res.message}`;
         } catch (err) {
           resBox.className = "test-result-box active error";
           resBox.textContent = `✗ ${err.message}`;
@@ -1320,9 +1337,8 @@
       withButton($("btn-test-ai"), async () => {
         try {
           const res = await api("/api/test/ai", { method: "POST" });
-          const sec = (res.duration_ms ? res.duration_ms / 1000 : 1.2).toFixed(1);
           resBox.className = "test-result-box active success";
-          resBox.textContent = `✓ Ответ получен за ${sec} с`;
+          resBox.textContent = `✓ ${res.message}`;
         } catch (err) {
           resBox.className = "test-result-box active error";
           resBox.textContent = `✗ ${err.message}`;
@@ -1336,7 +1352,9 @@
         const payload = {
           mode: $("mode").value,
           poll_interval: $("poll_interval").value.trim(),
-          debounce_pause: $("debounce_pause").value.trim(),
+          debounce: $("debounce").value.trim(),
+          digest_time: $("digest_time").value.trim(),
+          digest_tz: $("digest_tz").value.trim(),
           tone: $("tone").value.trim(),
           tg_notify_drafts: $("tg_notify_drafts").checked ? "1" : "0",
         };

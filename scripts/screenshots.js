@@ -29,7 +29,7 @@ function seedMockData() {
   setKv("ai_model", "claude-sonnet-5-5");
   setKv("mode", "approve");
   setKv("poll_interval", "5");
-  setKv("debounce_pause", "10");
+  setKv("debounce", "10");
   setKv("tone", "Пиши кратко и по существу, списком ключевых изменений для разработчиков.");
   setKv("test_post_sent", "1");
 

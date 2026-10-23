@@ -1,5 +1,5 @@
 const path = require("path");
-const { createDatabase, PLAIN, SECRETS, DEF } = require("./lib/db");
+const { createDatabase } = require("./lib/db");
 const { gh, tg, deleteWebhook, ai, buildInput, sleep } = require("./lib/services");
 const { publish, generate, check, getStatus } = require("./lib/poster");
 const { createApp } = require("./lib/app");
@@ -43,12 +43,18 @@ const ctx = {
 };
 
 let pollIntervalTimer = null;
+let nextPollAt = null;
 function schedulePoll() {
   if (pollIntervalTimer) clearInterval(pollIntervalTimer);
-  const mins = Math.max(1, Math.min(60, Number(dbBundle.get("poll_interval", "5")) || 5));
-  pollIntervalTimer = setInterval(() => check(false, ctx), mins * 60 * 1000);
+  const ms = Math.max(1, Math.min(60, Number(dbBundle.get("poll_interval", "5")) || 5)) * 60 * 1000;
+  nextPollAt = Date.now() + ms;
+  pollIntervalTimer = setInterval(() => {
+    nextPollAt = Date.now() + ms;
+    check(false, ctx);
+  }, ms);
 }
 ctx.schedulePoll = schedulePoll;
+ctx.getNextPollAt = () => nextPollAt;
 
 const app = createApp(ctx);
 

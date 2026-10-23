@@ -403,16 +403,23 @@
             <!-- Digest Fields (hidden unless mode === 'digest') -->
             <div id="digest-settings-group" style="display: none; flex-direction: column; gap: 14px;">
               <div class="form-group">
-                <label class="form-label" for="digest_time">Время публикации дайджеста (МСК)</label>
+                <label class="form-label" for="digest_time">Время дайджеста (каждый день)</label>
                 <input type="time" id="digest_time" class="form-input" value="18:00">
               </div>
               <div class="form-group">
-                <label class="form-label" for="digest_days">Дни дайджеста</label>
-                <select id="digest_days" class="form-select">
-                  <option value="everyday">Каждый день</option>
-                  <option value="weekdays">По будням (Пн-Пт)</option>
-                  <option value="weekly">Раз в неделю (Пт)</option>
-                </select>
+                <label class="form-label" for="digest_tz">Часовой пояс дайджеста</label>
+                <input type="text" id="digest_tz" class="form-input" list="tz-list" value="Europe/Moscow" placeholder="Europe/Moscow">
+                <datalist id="tz-list">
+                  <option value="Europe/Moscow">
+                  <option value="Asia/Tashkent">
+                  <option value="Europe/Kaliningrad">
+                  <option value="Asia/Yekaterinburg">
+                  <option value="Asia/Almaty">
+                  <option value="Europe/Berlin">
+                  <option value="Europe/London">
+                  <option value="UTC">
+                </datalist>
+                <span class="form-hint">Название часового пояса IANA, например Europe/Moscow или Asia/Tashkent.</span>
               </div>
             </div>
 
@@ -423,8 +430,8 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label" for="debounce_pause">Пауза после последнего коммита (минут)</label>
-              <input type="number" id="debounce_pause" class="form-input" min="1" max="60" value="10">
+              <label class="form-label" for="debounce">Пауза после последнего коммита (минут)</label>
+              <input type="number" id="debounce" class="form-input" min="0" max="120" value="10">
               <span class="form-hint">Ждать тишины перед формированием поста, чтобы объединить цепочку коммитов в один анонс.</span>
             </div>
 
