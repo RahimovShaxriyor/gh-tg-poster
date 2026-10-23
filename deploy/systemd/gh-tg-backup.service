@@ -1,0 +1,13 @@
+[Unit]
+Description=gh-tg-web: резервная копия базы
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=@DEPLOY_USER@
+WorkingDirectory=@APP_DIR@
+ExecStart=/bin/sh @APP_DIR@/deploy/backup.sh
+# Вывод — в журнал: journalctl -u gh-tg-backup
+StandardOutput=journal
+StandardError=journal
