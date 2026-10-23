@@ -170,6 +170,7 @@
           <a href="#settings/telegram" class="settings-link" data-section="telegram">Telegram</a>
           <a href="#settings/ai" class="settings-link" data-section="ai">ИИ</a>
           <a href="#settings/behavior" class="settings-link" data-section="behavior">Проверка и стиль</a>
+          <a href="#settings/memory" class="settings-link" data-section="memory">Память канала</a>
           <a href="#settings/security" class="settings-link" data-section="security">Безопасность</a>
         </nav>
 
@@ -386,6 +387,34 @@
 
             <div class="section-actions">
               <button type="submit" class="btn btn-primary">Сохранить</button>
+            </div>
+          </form>
+
+          <!-- Память канала: журнал объявленного -->
+          <form class="settings-section" id="sec-memory" data-section="memory" novalidate>
+            <h2 class="section-title">Память канала</h2>
+            <p class="section-note">Журнал того, что канал уже объявлял. ИИ видит его и не выдаёт старое за новое: пишет «доработано» и использует те же названия. Пункты добавляются сами, когда пост уходит в канал.</p>
+            <p class="field-value" id="memory-status" aria-live="polite"></p>
+            <ul class="memory-list" id="memory-list"></ul>
+
+            <div class="field">
+              <label class="label" for="memory-text">Старый пост</label>
+              <textarea id="memory-text" class="input textarea" rows="5" maxlength="4096" placeholder="Вставьте текст поста, который вышел в канале раньше, до подключения бота."></textarea>
+              <p class="hint">ИИ выпишет из него названия функций (один запрос к ИИ). Перед сохранением их можно поправить.</p>
+            </div>
+            <div class="section-actions">
+              <button type="button" class="btn btn-secondary" id="btn-memory-extract">Добавить старый пост в память</button>
+            </div>
+            <p class="result" id="memory-result" role="status" hidden></p>
+
+            <div id="memory-draft" hidden>
+              <h3 class="label">Что будет сохранено</h3>
+              <ul class="memory-edit" id="memory-edit"></ul>
+              <div class="section-actions">
+                <button type="button" class="btn btn-primary" id="btn-memory-save">Сохранить в память</button>
+                <button type="button" class="btn btn-ghost" id="btn-memory-add-row">Добавить пункт</button>
+                <button type="button" class="btn btn-ghost" id="btn-memory-cancel">Отмена</button>
+              </div>
             </div>
           </form>
 

@@ -1473,6 +1473,47 @@ kbd {
   color: var(--danger);
 }
 
+/* Память канала */
+.memory-list,
+.memory-edit {
+  margin: 0 0 var(--s4);
+  padding: 0;
+  list-style: none;
+}
+
+.memory-list li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+.memory-name {
+  font-weight: 600;
+}
+
+.memory-summary,
+.memory-src {
+  color: var(--text-2);
+}
+
+.memory-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+
+@media (max-width: 640px) {
+  .memory-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .memory-row-summary {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
 .form-error {
   margin: var(--s2) 0 0;
   color: var(--danger);

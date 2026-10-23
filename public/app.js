@@ -369,6 +369,7 @@
     if (S.view === "settings") {
       ensureRepos();
       ensureModels();
+      loadMemory();
       if (arg) $(`#sec-${arg}`)?.scrollIntoView({ block: "start" });
       else window.scrollTo(0, 0);
     }
@@ -1388,6 +1389,7 @@
     const section = form.dataset.section;
     const btn = form.querySelector('button[type="submit"]');
     if (section === "security") return changePassword(btn);
+    if (section === "memory") return undefined;
 
     const v = (id) => $("#" + id).value.trim();
     const payload = {};
@@ -1635,6 +1637,73 @@
         }
       });
     });
+  }
+
+  // ===== Память канала: журнал объявленного =====
+  async function loadMemory() {
+    try {
+      const res = await api("/api/memory");
+      $("#memory-status").textContent = res.total
+        ? `В памяти ${res.total} ${plural(res.total, "пункт", "пункта", "пунктов")} за последние ${res.days} дней.`
+        : `За последние ${res.days} дней в памяти пусто.`;
+      $("#memory-list").replaceChildren(...res.items.map((it) => h("li", {},
+        h("span", { class: "memory-name" }, it.name), it.summary ? h("span", { class: "memory-summary" }, " — " + it.summary) : null,
+        h("span", { class: "memory-src" }, it.post_id ? ` · пост #${it.post_id}` : " · добавлено вручную"))));
+    } catch (err) {
+      if (err.status !== 401) $("#memory-status").textContent = "Не удалось загрузить память: " + err.message;
+    }
+  }
+
+  function memoryRow(item = { name: "", summary: "" }) {
+    const remove = h("button", { type: "button", class: "btn btn-ghost btn-sm", "aria-label": "Убрать пункт" }, "Убрать");
+    const row = h("li", { class: "memory-row" },
+      h("input", { class: "input memory-row-name", maxlength: "100", placeholder: "Название", "aria-label": "Название", value: item.name }),
+      h("input", { class: "input memory-row-summary", maxlength: "300", placeholder: "Что объявлено", "aria-label": "Что объявлено", value: item.summary || "" }),
+      remove);
+    remove.addEventListener("click", () => row.remove());
+    return row;
+  }
+
+  function initMemory() {
+    const result = $("#memory-result");
+    const show = (text, kind) => {
+      result.textContent = text;
+      result.className = "result" + (kind ? " is-" + kind : "");
+      result.hidden = !text;
+    };
+    $("#btn-memory-extract").addEventListener("click", (e) => busy(e.currentTarget, async () => {
+      const text = $("#memory-text").value.trim();
+      if (!text) return show("Вставьте текст старого поста.", "error");
+      show("ИИ выписывает названия…");
+      try {
+        const res = await api("/api/memory/extract", { method: "POST", body: { text } });
+        $("#memory-edit").replaceChildren(...(res.items.length ? res.items : [{ name: "", summary: "" }]).map(memoryRow));
+        $("#memory-draft").hidden = false;
+        show(res.items.length ? "Проверьте и поправьте пункты, затем сохраните." : "ИИ не нашёл объявленных функций. Можно вписать пункты вручную.");
+      } catch (err) {
+        if (err.status !== 401) show(err.message, "error");
+      }
+    }));
+    $("#btn-memory-add-row").addEventListener("click", () => $("#memory-edit").append(memoryRow()));
+    $("#btn-memory-cancel").addEventListener("click", () => {
+      $("#memory-draft").hidden = true;
+      show("");
+    });
+    $("#btn-memory-save").addEventListener("click", (e) => busy(e.currentTarget, async () => {
+      const items = $$(".memory-row", $("#memory-edit"))
+        .map((row) => ({ name: $(".memory-row-name", row).value.trim(), summary: $(".memory-row-summary", row).value.trim() }))
+        .filter((it) => it.name);
+      if (!items.length) return show("Нет пунктов с названием.", "error");
+      try {
+        const res = await api("/api/memory/items", { method: "POST", body: { items } });
+        $("#memory-draft").hidden = true;
+        $("#memory-text").value = "";
+        show(`Сохранено в память: ${res.added}.`, "ok");
+        loadMemory();
+      } catch (err) {
+        if (err.status !== 401) show(err.message, "error");
+      }
+    }));
   }
 
   // ===== Вкладка «Коммиты» =====
@@ -2114,6 +2183,7 @@
     window.addEventListener("hashchange", applyRoute);
 
     initSettings();
+    initMemory();
     initCommits();
     showReturnMessage();
     if (!location.hash) history.replaceState(null, "", "#posts");
