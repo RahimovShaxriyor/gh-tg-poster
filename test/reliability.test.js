@@ -410,6 +410,26 @@ describe("HTTP: Origin, выход, валидация", () => {
     }
   });
 
+  it("правка черновика сохраняется только в черновик", async () => {
+    const draft = Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','i','Было','draft')").run().lastInsertRowid);
+    const sent = Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','i','Ушло','sent')").run().lastInsertRowid);
+
+    const ok = await post(`/api/posts/${draft}/text`, { text: "Стало" });
+    assert.equal(ok.status, 200);
+    assert.equal(ctx.post(draft).text, "Стало");
+
+    const conflict = await post(`/api/posts/${sent}/text`, { text: "Поздно" });
+    assert.equal(conflict.status, 409);
+    assert.equal(ctx.post(sent).text, "Ушло");
+
+    const missing = await post("/api/posts/999999/text", { text: "x" });
+    assert.equal(missing.status, 400);
+
+    const tooLong = await post(`/api/posts/${draft}/text`, { text: "x".repeat(10001) });
+    assert.equal(tooLong.status, 400);
+    assert.equal(ctx.post(draft).text, "Стало");
+  });
+
   it("заголовок X-Powered-By не отправляется", async () => {
     const res = await fetch(`${base}/health`);
     assert.equal(res.headers.get("x-powered-by"), null);

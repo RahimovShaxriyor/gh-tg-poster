@@ -2,494 +2,354 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
   <title>Анонсы из коммитов</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
 </head>
 <body>
-  <!-- Toast Notifications Container -->
-  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  <!-- Иконки: 16×16, линия 1.5 -->
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-commit" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.5"/><path d="M1 8h4.5M10.5 8H15"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="4.5" r="1.5"/><path d="M4.5 5v6M11.5 6v.5a3 3 0 0 1-3 3h-1a3 3 0 0 0-3 3"/></symbol>
+    <symbol id="i-send" viewBox="0 0 16 16"><path d="M14.5 1.5 7 9M14.5 1.5 10 14.5 7 9 1.5 6z"/></symbol>
+    <symbol id="i-chip" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6.5 1.5V4M9.5 1.5V4M6.5 12v2.5M9.5 12v2.5M1.5 6.5H4M1.5 9.5H4M12 6.5h2.5M12 9.5h2.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 1.5v3h-3"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 16 16"><path d="M6 14H3.5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1H6M10.5 11l3-3-3-3M13.5 8H6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 16 16"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4"/></symbol>
+    <symbol id="i-external" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5l-6 6M12 9.5v3.5a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V4.5A.5.5 0 0 1 3 4h3.5"/></symbol>
+    <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 1.8 14.8 13.5H1.2zM8 6v3.5M8 11.5v.01"/></symbol>
+    <symbol id="i-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.5v4M8 5v.01"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 16 16"><path d="M1.5 9h4l1 2h3l1-2h4M3.5 3h9l2 6v4.5h-13V9z"/></symbol>
+  </svg>
 
-  <!-- Login Overlay -->
-  <div id="login-overlay" class="login-overlay" style="display: none;">
-    <div class="login-card">
-      <div class="login-header">
-        <div class="login-icon">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-            <polyline points="22,6 12,13 2,6"></polyline>
-          </svg>
-        </div>
-        <h2 class="login-title">Анонсы из коммитов</h2>
-        <p class="login-desc">Введите пароль администратора для входа в панель</p>
-      </div>
-      <form id="login-form" class="login-form">
-        <div class="form-group">
-          <label class="form-label" for="pw">Пароль</label>
-          <input type="password" id="pw" class="form-input" placeholder="Пароль администратора" autocomplete="current-password" required>
-        </div>
-        <div id="login-error" class="login-error" style="display: none;"></div>
-        <button type="submit" id="go" class="btn btn-primary" style="width: 100%;">Войти</button>
-      </form>
-    </div>
+  <!-- Вход. Показывается поверх панели: при истёкшей сессии введённый текст остаётся на месте -->
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="login-box" novalidate>
+      <h1 class="login-title">Анонсы из коммитов</h1>
+      <p class="login-note" id="login-note">Введите пароль администратора.</p>
+      <label class="label" for="pw">Пароль</label>
+      <input type="password" id="pw" class="input" autocomplete="current-password" required>
+      <p class="form-error" id="login-error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-block" id="login-submit">Войти</button>
+    </form>
   </div>
 
-  <!-- Application Main Container -->
-  <div id="app" class="app-container">
-    <!-- Top App Header -->
-    <header class="app-header">
-    <div class="header-container">
-      <div class="header-left">
-        <div class="app-title">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-            <polyline points="22,6 12,13 2,6"></polyline>
-          </svg>
-          <span>Анонсы из коммитов</span>
-        </div>
+  <div id="app" class="app">
+    <header class="topbar">
+      <a class="brand" href="#posts" aria-label="Анонсы из коммитов, к постам">
+        <svg class="i"><use href="#i-commit"/></svg><span class="brand-name">Анонсы</span>
+      </a>
 
-        <div class="header-indicators">
-          <a href="#settings" class="indicator" id="ind-github" title="Проверка GitHub">
-            <span class="indicator-dot dot-gray" id="ind-github-dot"></span>
-            <span id="ind-github-text">GitHub</span>
-          </a>
-          <a href="#settings" class="indicator" id="ind-telegram" title="Проверка Telegram">
-            <span class="indicator-dot dot-gray" id="ind-telegram-dot"></span>
-            <span id="ind-telegram-text">Telegram</span>
-          </a>
-          <a href="#settings" class="indicator" id="ind-ai" title="Проверка ИИ">
-            <span class="indicator-dot dot-gray" id="ind-ai-dot"></span>
-            <span id="ind-ai-text">ИИ</span>
-          </a>
-        </div>
+      <nav class="views" aria-label="Разделы">
+        <a href="#posts" class="view-link" data-view="posts">Посты<span class="count" id="nav-drafts"></span></a>
+        <a href="#settings" class="view-link" data-view="settings">Настройки</a>
+      </nav>
+
+      <div class="conn" aria-label="Подключения">
+        <button type="button" class="conn-btn" data-conn="github" aria-expanded="false" aria-controls="conn-popover">
+          <svg class="i conn-icon" aria-hidden="true"><use href="#i-branch"/></svg><span class="dot" data-dot="github"></span><span class="conn-label">GitHub</span>
+        </button>
+        <button type="button" class="conn-btn" data-conn="telegram" aria-expanded="false" aria-controls="conn-popover">
+          <svg class="i conn-icon" aria-hidden="true"><use href="#i-send"/></svg><span class="dot" data-dot="telegram"></span><span class="conn-label">Telegram</span>
+        </button>
+        <button type="button" class="conn-btn" data-conn="ai" aria-expanded="false" aria-controls="conn-popover">
+          <svg class="i conn-icon" aria-hidden="true"><use href="#i-chip"/></svg><span class="dot" data-dot="ai"></span><span class="conn-label">ИИ</span>
+        </button>
       </div>
 
-      <div class="header-right">
-        <!-- Quick Mode Toggle -->
-        <div class="mode-toggle-group" title="Режим публикации постов">
-          <button type="button" class="mode-option-btn active" id="mode-btn-approve">Спрашивать меня</button>
-          <button type="button" class="mode-option-btn" id="mode-btn-auto">Публиковать сразу</button>
-        </div>
-
-        <button type="button" class="btn btn-secondary btn-sm" id="btn-header-check">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M23 4v6h-6"></path>
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-          </svg>
-          Проверить сейчас
+      <div class="topbar-actions">
+        <button type="button" class="btn btn-ghost" id="btn-check" title="Проверить новые коммиты сейчас">
+          <svg class="i"><use href="#i-refresh"/></svg><span class="hide-narrow">Проверить</span>
         </button>
-
-        <button type="button" class="btn btn-secondary btn-sm" id="btn-header-logout">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-            <polyline points="16 17 21 12 16 7"></polyline>
-            <line x1="21" y1="12" x2="9" y2="12"></line>
-          </svg>
-          Выйти
+        <button type="button" class="btn btn-ghost btn-icon hide-narrow" id="btn-logout" title="Выйти" aria-label="Выйти">
+          <svg class="i"><use href="#i-logout"/></svg>
         </button>
+      </div>
+    </header>
+
+    <div class="popover" id="conn-popover" role="dialog" aria-labelledby="pop-title" hidden>
+      <p class="pop-title" id="pop-title"></p>
+      <p class="pop-text" id="pop-text"></p>
+      <p class="pop-result" id="pop-result" hidden></p>
+      <div class="pop-actions">
+        <button type="button" class="btn btn-secondary btn-sm" id="pop-test">Проверить</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="pop-settings">Настройки</button>
       </div>
     </div>
-  </header>
 
-  <!-- Tabs Navigation -->
-  <nav class="tabs-bar" aria-label="Разделы приложения">
-    <div class="tabs-container">
-      <button type="button" class="nav-tab active" data-tab="posts" id="tab-posts">
-        Посты
-        <span class="tab-badge" id="tab-badge-posts"></span>
-      </button>
-      <button type="button" class="nav-tab" data-tab="settings" id="tab-settings">
-        Настройки
-      </button>
-    </div>
-  </nav>
-
-  <!-- Main View Container -->
-  <main class="main-wrapper">
-    <!-- ==================== POSTS VIEW ==================== -->
-    <section class="view-section active" id="view-posts">
-      <!-- 1. Onboarding Card (visible until all 4 steps are complete) -->
-      <div class="onboarding-card" id="onboarding-card" style="display: none;">
-        <div class="onboarding-header">
-          <h2 class="onboarding-title">Начало работы</h2>
-          <span class="onboarding-progress" id="onboarding-progress">Выполнено 0 из 4</span>
-        </div>
-        <div class="onboarding-steps">
-          <div class="onboarding-step" id="step-1">
-            <div class="step-info">
-              <span class="step-num">1</span>
-              <span>Подключить GitHub и выбрать репозиторий</span>
+    <main class="main">
+      <!-- ПОСТЫ: список слева, выбранный пост справа; на узком экране по очереди -->
+      <section class="view view-posts" id="view-posts" aria-label="Посты">
+        <div class="list-pane">
+          <div class="list-head">
+            <p class="status-line" id="status-line"><span class="skeleton skeleton-text"></span></p>
+            <div class="filters" role="tablist" aria-label="Фильтр постов">
+              <button type="button" role="tab" class="filter" data-filter="all">Все<span class="count" data-count="total"></span></button>
+              <button type="button" role="tab" class="filter" data-filter="draft">Черновики<span class="count" data-count="draft"></span></button>
+              <button type="button" role="tab" class="filter" data-filter="failed">Ошибки<span class="count" data-count="failed"></span></button>
+              <button type="button" role="tab" class="filter" data-filter="sent">Отправлены<span class="count" data-count="sent"></span></button>
+              <button type="button" role="tab" class="filter" data-filter="skipped">Пропущены<span class="count" data-count="skipped"></span></button>
+              <button type="button" role="tab" class="filter" data-filter="rejected">Отклонены<span class="count" data-count="rejected"></span></button>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm step-action-btn" id="btn-onboard-github">Настроить</button>
           </div>
-          <div class="onboarding-step" id="step-2">
-            <div class="step-info">
-              <span class="step-num">2</span>
-              <span>Подключить Telegram-бота и канал</span>
-            </div>
-            <button type="button" class="btn btn-secondary btn-sm step-action-btn" id="btn-onboard-telegram">Настроить</button>
+
+          <ul class="post-list" id="post-list" aria-label="Список постов"></ul>
+          <div class="list-empty" id="list-empty" hidden></div>
+          <div class="list-more" id="list-more" hidden>
+            <button type="button" class="btn btn-secondary btn-block" id="btn-more">Показать ещё</button>
           </div>
-          <div class="onboarding-step" id="step-3">
-            <div class="step-info">
-              <span class="step-num">3</span>
-              <span>Подключить ИИ</span>
-            </div>
-            <button type="button" class="btn btn-secondary btn-sm step-action-btn" id="btn-onboard-ai">Настроить</button>
-          </div>
-          <div class="onboarding-step" id="step-4">
-            <div class="step-info">
-              <span class="step-num">4</span>
-              <span>Отправить тестовый пост</span>
-            </div>
-            <button type="button" class="btn btn-primary btn-sm step-action-btn" id="btn-onboard-test">Отправить тест</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 2. Single-line Metrics Summary -->
-      <div class="summary-strip" id="summary-strip">
-        <span class="summary-item">Ждут решения: <strong id="sum-waiting">0</strong></span>
-        <span class="summary-dot">•</span>
-        <span class="summary-item">Отправлено сегодня: <strong id="sum-sent-today">0</strong></span>
-        <span class="summary-dot">•</span>
-        <span class="summary-item">Следующая проверка через <strong id="sum-next-poll">5 мин</strong></span>
-        <span id="sum-debounce-item" style="display: none;">
-          <span class="summary-dot">•</span>
-          <span class="summary-item highlight">Ожидаем паузу после коммита: <strong id="sum-debounce">0 мин</strong></span>
-        </span>
-      </div>
-
-      <!-- 3. Filter Chips -->
-      <div class="filters-bar" id="filters-bar">
-        <button type="button" class="filter-chip active" data-filter="all">
-          Все <span class="chip-count" id="filter-count-all">0</span>
-        </button>
-        <button type="button" class="filter-chip" data-filter="draft">
-          Черновики <span class="chip-count" id="filter-count-draft">0</span>
-        </button>
-        <button type="button" class="filter-chip" data-filter="sent">
-          Отправленные <span class="chip-count" id="filter-count-sent">0</span>
-        </button>
-        <button type="button" class="filter-chip" data-filter="skipped">
-          Пропущенные <span class="chip-count" id="filter-count-skipped">0</span>
-        </button>
-        <button type="button" class="filter-chip" data-filter="failed">
-          Ошибки <span class="chip-count" id="filter-count-failed">0</span>
-        </button>
-      </div>
-
-      <!-- 4. Feed Container -->
-      <div class="feed-container">
-        <!-- Posts List -->
-        <div id="posts-list"></div>
-
-        <!-- 5. Empty State -->
-        <div class="empty-state" id="posts-empty" style="display: none;">
-          <div class="empty-state-icon">📬</div>
-          <h3 class="empty-state-title">Постов пока нет</h3>
-          <p class="empty-state-desc">Сделайте коммит в выбранный репозиторий или нажмите «Проверить сейчас».</p>
-          <button type="button" class="btn btn-primary" id="btn-empty-check">Проверить сейчас</button>
+          <p class="list-hint hide-narrow">Клавиши <kbd>j</kbd> и <kbd>k</kbd> — следующий и предыдущий пост.</p>
         </div>
 
-        <!-- 8. Pagination Load More -->
-        <div class="load-more-box" id="load-more-box" style="display: none;">
-          <button type="button" class="btn btn-secondary" id="btn-load-more">Показать ещё</button>
-        </div>
-      </div>
-    </section>
+        <div class="detail-pane" id="detail" tabindex="-1"></div>
+      </section>
 
-    <!-- ==================== SETTINGS VIEW ==================== -->
-    <section class="view-section" id="view-settings">
-      <div class="settings-layout">
-        <!-- Settings Sidebar Navigation -->
-        <aside class="settings-nav" aria-label="Разделы настроек">
-          <button type="button" class="settings-nav-btn active" data-section="github">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
-            GitHub
-          </button>
-          <button type="button" class="settings-nav-btn" data-section="telegram">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-            Telegram
-          </button>
-          <button type="button" class="settings-nav-btn" data-section="ai">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>
-            Искусственный интеллект
-          </button>
-          <button type="button" class="settings-nav-btn" data-section="behavior">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-            Поведение
-          </button>
-          <button type="button" class="settings-nav-btn" data-section="security">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-            Безопасность
-          </button>
-        </aside>
+      <!-- НАСТРОЙКИ -->
+      <section class="view view-settings" id="view-settings" aria-label="Настройки" hidden>
+        <nav class="settings-nav" aria-label="Разделы настроек">
+          <a href="#settings/github" class="settings-link" data-section="github">GitHub</a>
+          <a href="#settings/telegram" class="settings-link" data-section="telegram">Telegram</a>
+          <a href="#settings/ai" class="settings-link" data-section="ai">ИИ</a>
+          <a href="#settings/behavior" class="settings-link" data-section="behavior">Проверка и стиль</a>
+          <a href="#settings/security" class="settings-link" data-section="security">Безопасность</a>
+        </nav>
 
-        <!-- Settings Content Pane -->
-        <div class="settings-content-pane">
-          <!-- SECTION 1: GITHUB -->
-          <div class="settings-section active" data-section="github" id="sec-github">
-            <div class="section-header">
-              <h2 class="section-title">Подключение к GitHub</h2>
-              <p class="section-subtitle">Основной способ: GitHub App. Запасной: персональный токен доступа.</p>
-            </div>
+        <div class="settings-body">
+          <!-- GitHub -->
+          <form class="settings-section" id="sec-github" data-section="github" novalidate>
+            <h2 class="section-title">GitHub</h2>
+            <p class="section-note">Откуда брать коммиты. Нужен доступ только на чтение.</p>
 
-            <!-- GitHub App Card / Connect Block -->
-            <div class="gh-app-box" id="gh-app-box">
-              <!-- When NOT connected -->
-              <div id="gh-app-connect-pane" style="display: none;">
-                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                  <a href="/auth/github/start" class="btn btn-primary" id="btn-gh-app-connect">Подключить GitHub</a>
-                  <button type="button" class="btn btn-primary" id="btn-gh-app-disabled" disabled style="display: none;">Подключить GitHub</button>
-                  <span class="form-hint" id="gh-app-hint" style="margin: 0;"></span>
-                </div>
+            <div class="field" id="gh-app-block" hidden>
+              <span class="label">GitHub App</span>
+              <div id="gh-app-off">
+                <a href="/auth/github/start" class="btn btn-secondary" id="gh-app-connect">Подключить через GitHub App</a>
               </div>
-
-              <!-- When CONNECTED -->
-              <div id="gh-app-connected-pane" class="connected-badge-box" style="display: none;">
-                <div class="connected-info-row">
-                  <span class="indicator-dot dot-green"></span>
-                  <span id="gh-app-connected-text">Подключено: <strong id="gh-app-connected-login">аккаунт</strong>, доступ к <span id="gh-app-connected-count">0</span> репозиториям</span>
-                </div>
-                <div class="connected-actions-row">
-                  <a href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" id="btn-gh-app-manage">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                    Изменить доступ к репозиториям
+              <div id="gh-app-on" hidden>
+                <p class="field-value">Подключено: <strong id="gh-app-login"></strong></p>
+                <div class="row">
+                  <a href="#" class="btn btn-secondary btn-sm" id="gh-app-manage" target="_blank" rel="noopener noreferrer">
+                    Доступ к репозиториям<svg class="i"><use href="#i-external"/></svg>
                   </a>
-                  <button type="button" class="btn btn-danger btn-sm" id="btn-gh-app-disconnect">Отключить</button>
+                  <button type="button" class="btn btn-ghost btn-sm danger-text" id="gh-app-disconnect">Отключить</button>
                 </div>
-                <span class="form-hint" id="gh-app-disconnect-hint" style="display: block; margin-top: 6px;">
-                  Отключение удаляет привязку в панели. Чтобы полностью отозвать доступ, удалите установку на странице GitHub.
-                </span>
               </div>
             </div>
 
-            <div class="form-group">
-              <label class="form-label" for="repo-select">Репозиторий</label>
-              <select id="repo-select" class="form-select">
-                <option value="">Сначала подключите GitHub</option>
-              </select>
-              <span class="form-hint">Список доступных репозиториев подгружается автоматически.</span>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="branch">Ветка по умолчанию</label>
-              <input type="text" id="branch" class="form-input" value="main" placeholder="main">
-            </div>
-
-            <!-- Manual Token Collapsible -->
-            <details class="manual-token-details" id="manual-token-details" style="margin-top: 14px;">
-              <summary class="manual-token-summary" style="cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--ink-muted); user-select: none;">
-                Подключить вручную токеном
-              </summary>
-              <div class="form-group" style="margin-top: 12px; padding: 14px; background-color: var(--bg-subtle); border-radius: var(--radius-sm); border: 1px solid var(--line);">
-                <label class="form-label" for="github_token">Персональный токен GitHub (Personal Access Token)</label>
-                <div class="input-row">
-                  <input type="password" id="github_token" class="form-input" placeholder="ghp_••••••••••••••••••••">
-                  <button type="button" class="btn btn-secondary btn-sm" id="btn-change-github_token" style="display: none;">Изменить</button>
-                </div>
-                <span class="form-hint">Требуется доступ repo (для приватных) или public_repo. Используется только если не подключен GitHub App.</span>
+            <div class="field" id="gh-token-field">
+              <label class="label" for="github_token">Токен GitHub</label>
+              <div class="secret">
+                <input type="password" id="github_token" name="github_token" class="input" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+                <button type="button" class="btn btn-secondary btn-sm" data-unmask="github_token" hidden>Заменить</button>
               </div>
-            </details>
-
-            <div class="section-actions" style="margin-top: 16px;">
-              <button type="button" class="btn btn-primary" id="btn-save-github">Сохранить</button>
-              <button type="button" class="btn btn-secondary" id="btn-test-github">Проверить подключение</button>
-            </div>
-            <div class="test-result-box" id="test-result-github"></div>
-          </div>
-
-          <!-- SECTION 2: TELEGRAM -->
-          <div class="settings-section" data-section="telegram" id="sec-telegram">
-            <div class="section-header">
-              <h2 class="section-title">Подключение к Telegram</h2>
-              <p class="section-subtitle">Настройка бота и канала для публикаций анонсов</p>
+              <p class="hint">Fine-grained токен: доступ к одному репозиторию, Contents — Read-only. Если подключён GitHub App, токен не используется.</p>
             </div>
 
-            <div class="form-group">
-              <label class="form-label" for="tg_token">Токен Telegram-бота</label>
-              <div class="input-row">
-                <input type="password" id="tg_token" class="form-input" placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz">
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-change-tg_token" style="display: none;">Изменить</button>
-              </div>
-              <span class="form-hint">Создаётся через @BotFather в Telegram.</span>
+            <div class="field">
+              <label class="label" for="repo">Репозиторий</label>
+              <select id="repo" name="repo" class="input"></select>
+              <p class="hint" id="repo-hint">Список появится после подключения GitHub.</p>
             </div>
 
-            <div class="form-group">
-              <label class="form-label" for="channel_id">ID канала или юзернейм (@channel)</label>
-              <input type="text" id="channel_id" class="form-input" placeholder="@my_channel или -1001234567890">
-              <span class="form-hint">Добавьте бота администратором в ваш канал с правом публикации сообщений.</span>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Владелец бота (для уведомлений в личные сообщения)</label>
-              <div class="input-row">
-                <div class="form-input" id="owner-chat-info" style="display: flex; align-items: center; background-color: var(--bg-subtle);">
-                  Владелец ещё не назначен. Нажмите «Получить код» и отправьте его боту
-                </div>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-owner-code">Получить код</button>
-                <button type="button" class="btn btn-danger btn-sm" id="btn-reset-owner" style="display: none;">Сбросить</button>
-              </div>
-              <div class="test-result-box" id="owner-code-box"></div>
-              <span class="form-hint">Нажмите «Получить код» и отправьте боту в личные сообщения команду /start с кодом (код действует 15 минут). Владелец получает черновики на согласование, а канал привяжется автоматически, только если бота добавит админом сам владелец.</span>
+            <div class="field">
+              <label class="label" for="branch">Ветка</label>
+              <input type="text" id="branch" name="branch" class="input input-short" autocomplete="off" spellcheck="false">
             </div>
 
             <div class="section-actions">
-              <button type="button" class="btn btn-primary" id="btn-save-telegram">Сохранить</button>
-              <button type="button" class="btn btn-secondary" id="btn-test-telegram">Проверить подключение</button>
-              <button type="button" class="btn btn-secondary" id="btn-test-channel-post">Отправить тест в канал</button>
+              <button type="submit" class="btn btn-primary">Сохранить</button>
+              <button type="button" class="btn btn-secondary" data-test="github">Проверить подключение</button>
             </div>
-            <div class="test-result-box" id="test-result-telegram"></div>
-          </div>
+            <p class="result" data-result="github" role="status" hidden></p>
+          </form>
 
-          <!-- SECTION 3: AI -->
-          <div class="settings-section" data-section="ai" id="sec-ai">
-            <div class="section-header">
-              <h2 class="section-title">Искусственный интеллект</h2>
-              <p class="section-subtitle">Генерация текста анонсов на основе изменений и коммитов</p>
-            </div>
+          <!-- Telegram -->
+          <form class="settings-section" id="sec-telegram" data-section="telegram" novalidate>
+            <h2 class="section-title">Telegram</h2>
+            <p class="section-note">Бот публикует посты в канал и присылает вам черновики в личку.</p>
 
-            <div class="form-group">
-              <label class="form-label" for="ai_provider">Провайдер ИИ</label>
-              <select id="ai_provider" class="form-select">
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="openai">OpenAI (ChatGPT)</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="ai_key">API Ключ ИИ</label>
-              <div class="input-row">
-                <input type="password" id="ai_key" class="form-input" placeholder="sk-••••••••••••••••••••">
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-change-ai_key" style="display: none;">Изменить</button>
+            <div class="field">
+              <label class="label" for="tg_token">Токен бота</label>
+              <div class="secret">
+                <input type="password" id="tg_token" name="tg_token" class="input" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
+                <button type="button" class="btn btn-secondary btn-sm" data-unmask="tg_token" hidden>Заменить</button>
               </div>
-              <span class="form-hint">Ключ безопасно сохраняется в зашифрованном виде.</span>
+              <p class="hint">Выдаёт @BotFather командой /newbot.</p>
             </div>
 
-            <div class="form-group">
-              <label class="form-label" for="ai_model">Модель ИИ</label>
-              <input type="text" id="ai_model" list="ai-models-list" class="form-input" placeholder="Например: claude-sonnet-5-5">
-              <datalist id="ai-models-list">
-                <option value="claude-sonnet-5-5">
-                <option value="claude-haiku-5-5">
-                <option value="claude-opus-5-5">
-              </datalist>
-              <span class="form-hint" id="ai-model-hint">Рекомендуемые модели: claude-sonnet-5-5, claude-haiku-5-5</span>
+            <div class="field">
+              <label class="label" for="channel_id">Канал</label>
+              <input type="text" id="channel_id" name="channel_id" class="input" autocomplete="off" spellcheck="false" placeholder="@my_channel или -1001234567890">
+              <p class="hint">Бот должен быть администратором канала с правом публикации. Если вы привязаны как владелец и добавите бота в канал сами, поле заполнится автоматически.</p>
             </div>
 
-            <div class="section-actions">
-              <button type="button" class="btn btn-primary" id="btn-save-ai">Сохранить</button>
-              <button type="button" class="btn btn-secondary" id="btn-test-ai">Проверить подключение</button>
-            </div>
-            <div class="test-result-box" id="test-result-ai"></div>
-          </div>
-
-          <!-- SECTION 4: BEHAVIOR -->
-          <div class="settings-section" data-section="behavior" id="sec-behavior">
-            <div class="section-header">
-              <h2 class="section-title">Поведение и стиль</h2>
-              <p class="section-subtitle">Режимы публикации, тайминги и инструкции для генерации</p>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="mode">Режим работы</label>
-              <select id="mode" class="form-select">
-                <option value="approve">Черновики (спрашивать подтверждение)</option>
-                <option value="auto">Публиковать сразу (автоматически)</option>
-                <option value="digest">Дайджест (публиковать по расписанию)</option>
-              </select>
-            </div>
-
-            <!-- Digest Fields (hidden unless mode === 'digest') -->
-            <div id="digest-settings-group" style="display: none; flex-direction: column; gap: 14px;">
-              <div class="form-group">
-                <label class="form-label" for="digest_time">Время дайджеста (каждый день)</label>
-                <input type="time" id="digest_time" class="form-input" value="18:00">
+            <div class="field">
+              <span class="label">Владелец бота</span>
+              <p class="field-value" id="owner-status"></p>
+              <div class="row">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-owner-code">Получить код привязки</button>
+                <button type="button" class="btn btn-ghost btn-sm danger-text" id="btn-owner-reset" hidden>Отвязать</button>
               </div>
-              <div class="form-group">
-                <label class="form-label" for="digest_tz">Часовой пояс дайджеста</label>
-                <input type="text" id="digest_tz" class="form-input" list="tz-list" value="Europe/Moscow" placeholder="Europe/Moscow">
-                <datalist id="tz-list">
-                  <option value="Europe/Moscow">
-                  <option value="Asia/Tashkent">
-                  <option value="Europe/Kaliningrad">
-                  <option value="Asia/Yekaterinburg">
-                  <option value="Asia/Almaty">
-                  <option value="Europe/Berlin">
-                  <option value="Europe/London">
-                  <option value="UTC">
-                </datalist>
-                <span class="form-hint">Название часового пояса IANA, например Europe/Moscow или Asia/Tashkent.</span>
-              </div>
+              <p class="result" id="owner-code" role="status" hidden></p>
+              <p class="hint">Владелец получает черновики с кнопками и может писать боту /check и /status. Остальным бот не отвечает.</p>
             </div>
 
-            <div class="form-group">
-              <label class="form-label" for="poll_interval">Интервал проверки новых коммитов (минут)</label>
-              <input type="number" id="poll_interval" class="form-input" min="1" max="60" value="5">
-              <span class="form-hint">Как часто опрашивать GitHub API на появление новых изменений.</span>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="debounce">Пауза после последнего коммита (минут)</label>
-              <input type="number" id="debounce" class="form-input" min="0" max="120" value="10">
-              <span class="form-hint">Ждать тишины перед формированием поста, чтобы объединить цепочку коммитов в один анонс.</span>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Уведомления в Telegram</label>
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px;">
-                <input type="checkbox" id="tg_notify_drafts">
-                Присылать черновики в личку владельцу бота с кнопками быстрой публикации
+            <div class="field">
+              <label class="check">
+                <input type="checkbox" id="tg_notify_drafts" name="tg_notify_drafts">
+                <span>Присылать новые черновики в личку</span>
               </label>
             </div>
 
-            <div class="form-group">
-              <label class="form-label" for="tone">Стиль и инструкции для ИИ</label>
-              <textarea id="tone" class="form-textarea" rows="4" placeholder="Инструкции по форматированию, тону и структуре постов..."></textarea>
-              <span class="form-hint">Выберите готовый шаблон или напишите свои правила:</span>
-              <div class="presets-group">
-                <button type="button" class="preset-chip" data-prompt="Пиши максимально лаконично, списком ключевых изменений, без приветствий и лишних клише.">Кратко и ёмко</button>
-                <button type="button" class="preset-chip" data-prompt="Пиши увлекательно и живо, для широкой аудитории разработчиков, подчеркни практическую пользу новых улучшений.">Дружелюбно и живо</button>
-                <button type="button" class="preset-chip" data-prompt="Формат Release Notes: номер версии, перечень Breaking Changes, Новые возможности и Исправления с кратким техническим описанием.">Технический релиз</button>
+            <div class="section-actions">
+              <button type="submit" class="btn btn-primary">Сохранить</button>
+              <button type="button" class="btn btn-secondary" data-test="telegram">Проверить подключение</button>
+              <button type="button" class="btn btn-ghost" id="btn-test-post">Отправить тест в канал</button>
+            </div>
+            <p class="result" data-result="telegram" role="status" hidden></p>
+          </form>
+
+          <!-- ИИ -->
+          <form class="settings-section" id="sec-ai" data-section="ai" novalidate>
+            <h2 class="section-title">ИИ</h2>
+            <p class="section-note">Пишет текст поста по коммитам и изменениям в коде.</p>
+
+            <div class="field">
+              <label class="label" for="ai_provider">Провайдер</label>
+              <select id="ai_provider" name="ai_provider" class="input input-short">
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label class="label" for="ai_key">Ключ API</label>
+              <div class="secret">
+                <input type="password" id="ai_key" name="ai_key" class="input" autocomplete="off" spellcheck="false" placeholder="sk-…">
+                <button type="button" class="btn btn-secondary btn-sm" data-unmask="ai_key" hidden>Заменить</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="label" for="ai_model">Модель</label>
+              <input type="text" id="ai_model" name="ai_model" class="input" list="ai-models" autocomplete="off" spellcheck="false">
+              <datalist id="ai-models"></datalist>
+              <p class="hint" id="ai-model-hint"></p>
+            </div>
+
+            <div class="section-actions">
+              <button type="submit" class="btn btn-primary">Сохранить</button>
+              <button type="button" class="btn btn-secondary" data-test="ai">Проверить подключение</button>
+            </div>
+            <p class="result" data-result="ai" role="status" hidden></p>
+          </form>
+
+          <!-- Проверка и стиль -->
+          <form class="settings-section" id="sec-behavior" data-section="behavior" novalidate>
+            <h2 class="section-title">Проверка и стиль</h2>
+            <p class="section-note">Как часто смотреть в GitHub и как писать посты.</p>
+
+            <div class="field">
+              <label class="label" for="mode">Режим</label>
+              <select id="mode" name="mode" class="input">
+                <option value="approve">Черновики: публикую сам по кнопке</option>
+                <option value="auto">Публиковать сразу, без проверки</option>
+                <option value="digest">Дайджест раз в день</option>
+              </select>
+            </div>
+
+            <div class="field-row" id="digest-fields" hidden>
+              <div class="field">
+                <label class="label" for="digest_time">Время дайджеста</label>
+                <input type="time" id="digest_time" name="digest_time" class="input input-short">
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="label" for="digest_tz">Часовой пояс</label>
+              <input type="text" id="digest_tz" name="digest_tz" class="input input-short" list="tz-list" autocomplete="off" spellcheck="false">
+              <datalist id="tz-list">
+                <option value="Asia/Tashkent"></option>
+                <option value="Europe/Moscow"></option>
+                <option value="Asia/Almaty"></option>
+                <option value="Asia/Yekaterinburg"></option>
+                <option value="Europe/Berlin"></option>
+                <option value="Europe/London"></option>
+                <option value="UTC"></option>
+              </datalist>
+              <p class="hint">Для дайджеста и для времени в ответах бота. Формат IANA, например Asia/Tashkent.</p>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label class="label" for="poll_interval">Проверять каждые, мин</label>
+                <input type="number" id="poll_interval" name="poll_interval" class="input input-num" min="1" max="60" inputmode="numeric">
+              </div>
+              <div class="field">
+                <label class="label" for="debounce">Ждать тишины, мин</label>
+                <input type="number" id="debounce" name="debounce" class="input input-num" min="0" max="120" inputmode="numeric">
+              </div>
+            </div>
+            <p class="hint hint-tight">Пост пишется, когда после последнего коммита прошла пауза: серия коммитов попадёт в один пост. Команда /check в боте паузу не ждёт.</p>
+
+            <div class="field">
+              <label class="label" for="tone">Пожелания к стилю</label>
+              <textarea id="tone" name="tone" class="input textarea" rows="4" placeholder="Например: коротко, без приветствий, в конце ссылка на релиз."></textarea>
+              <div class="row presets">
+                <button type="button" class="btn btn-ghost btn-sm" data-preset="Пиши максимально лаконично, списком ключевых изменений, без приветствий и лишних клише.">Кратко</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-preset="Пиши увлекательно и живо, для широкой аудитории разработчиков, подчеркни практическую пользу новых улучшений.">Живо</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-preset="Формат Release Notes: номер версии, перечень Breaking Changes, Новые возможности и Исправления с кратким техническим описанием.">Release notes</button>
               </div>
             </div>
 
             <div class="section-actions">
-              <button type="button" class="btn btn-primary" id="btn-save-behavior">Сохранить</button>
+              <button type="submit" class="btn btn-primary">Сохранить</button>
             </div>
-          </div>
+          </form>
 
-          <!-- SECTION 5: SECURITY -->
-          <div class="settings-section" data-section="security" id="sec-security">
-            <div class="section-header">
-              <h2 class="section-title">Безопасность</h2>
-              <p class="section-subtitle">Смена административного пароля и статус шифрования данных</p>
-            </div>
+          <!-- Безопасность -->
+          <form class="settings-section" id="sec-security" data-section="security" novalidate>
+            <h2 class="section-title">Безопасность</h2>
+            <p class="section-note" id="enc-status"></p>
 
-            <div class="form-group">
-              <label class="form-label">Статус шифрования секретов в базе данных</label>
-              <div>
-                <span class="status-pill disabled" id="enc-status-pill">Шифрование выключено</span>
-              </div>
-              <span class="form-hint">Задайте переменную окружения ENCRYPTION_KEY на сервере для активации шифрования AES-256-GCM.</span>
+            <div class="field">
+              <label class="label" for="current_password">Текущий пароль</label>
+              <input type="password" id="current_password" class="input input-mid" autocomplete="current-password">
             </div>
-
-            <div class="form-group" style="margin-top: 10px;">
-              <label class="form-label">Смена пароля администратора</label>
-              <div style="display: flex; flex-direction: column; gap: 8px; max-width: 400px;">
-                <input type="password" id="current_password" class="form-input" placeholder="Текущий пароль">
-                <input type="password" id="new_password" class="form-input" placeholder="Новый пароль (минимум 6 символов)">
-                <input type="password" id="confirm_password" class="form-input" placeholder="Повторите новый пароль">
-                <button type="button" class="btn btn-primary" id="btn-change-password">Сохранить новый пароль</button>
-              </div>
+            <div class="field">
+              <label class="label" for="new_password">Новый пароль</label>
+              <input type="password" id="new_password" class="input input-mid" autocomplete="new-password" minlength="6">
             </div>
-          </div>
+            <div class="field">
+              <label class="label" for="confirm_password">Новый пароль ещё раз</label>
+              <input type="password" id="confirm_password" class="input input-mid" autocomplete="new-password">
+              <p class="hint">После смены пароля все остальные сессии завершатся. Пароль из .env перестанет действовать; вернуть его можно командой из README.</p>
+            </div>
+            <div class="section-actions">
+              <button type="submit" class="btn btn-primary">Сменить пароль</button>
+              <button type="button" class="btn btn-secondary" id="btn-logout-2">Выйти из панели</button>
+            </div>
+          </form>
         </div>
-      </div>
-    </section>
-  </main>
+      </section>
+    </main>
   </div>
 
-  <script src="/app.js" defer></script>
+  <dialog class="dialog" id="confirm" aria-labelledby="confirm-title">
+    <form method="dialog" class="dialog-body">
+      <h2 class="dialog-title" id="confirm-title"></h2>
+      <p class="dialog-text" id="confirm-text"></p>
+      <div class="dialog-actions">
+        <button type="submit" value="cancel" class="btn btn-secondary" id="confirm-cancel">Отмена</button>
+        <button type="submit" value="ok" class="btn btn-danger" id="confirm-ok"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts"></div>
 </body>
 </html>
