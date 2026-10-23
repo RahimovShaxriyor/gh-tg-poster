@@ -1308,6 +1308,13 @@
       $("#ai_provider").value = s.ai_provider || "anthropic";
       secretField("ai_key", s.ai_key_set, s.ai_key_corrupted);
       $("#ai_model").value = s.ai_model || "";
+      $("#strict_check").checked = s.strict_check !== "0";
+      $("#strict-risk").hidden = s.strict_check !== "0";
+      $("#verify_model").value = s.verify_model || "";
+    });
+
+    fill("memory", () => {
+      $("#journal_days").value = s.journal_days || "90";
     });
 
     fill("behavior", () => {
@@ -1605,7 +1612,7 @@
     const section = form.dataset.section;
     const btn = form.querySelector('button[type="submit"]');
     if (section === "security") return changePassword(btn);
-    if (section === "memory") return undefined;
+
 
     const v = (id) => $("#" + id).value.trim();
     const payload = {};
@@ -1621,6 +1628,19 @@
     if (section === "ai") {
       payload.ai_provider = v("ai_provider");
       payload.ai_model = v("ai_model");
+      payload.strict_check = $("#strict_check").checked ? "1" : "0";
+      payload.verify_model = v("verify_model");
+      if (payload.strict_check === "0" && S.settings.strict_check !== "0") {
+        const ok = await confirmDialog({
+          title: "Выключить строгую проверку?",
+          text: "ИИ перестанет сверять текст с фактами и переписывать его по замечаниям: выдуманные детали могут попасть в канал. Кодовая сверка чисел, версий, имён файлов и ссылок останется.",
+          ok: "Выключить",
+        });
+        if (!ok) return undefined;
+      }
+    }
+    if (section === "memory") {
+      payload.journal_days = v("journal_days");
     }
     if (section === "behavior") {
       for (const k of ["mode", "digest_time", "digest_tz", "poll_interval", "debounce", "tone"]) payload[k] = v(k);
@@ -1648,6 +1668,7 @@
         await loadState();
         if (section === "github") ensureRepos();
         if (section === "ai") loadModels();
+        if (section === "memory") loadMemory();
       } catch (err) {
         fail(err);
       }
@@ -1733,6 +1754,9 @@
     modelInput.addEventListener("keydown", onModelKeydown);
     $("#btn-models-refresh").addEventListener("click", () => loadModels({ refresh: true }));
     $("#btn-models-retry").addEventListener("click", () => loadModels({ refresh: true }));
+    $("#strict_check").addEventListener("change", (e) => {
+      $("#strict-risk").hidden = e.target.checked;
+    });
     $("#mode").addEventListener("change", (e) => {
       $("#digest-fields").hidden = e.target.value !== "digest";
     });

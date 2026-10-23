@@ -321,6 +321,21 @@
               </div>
             </div>
 
+            <div class="field">
+              <label class="check">
+                <input type="checkbox" id="strict_check" name="strict_check">
+                <span>Строгая проверка</span>
+              </label>
+              <p class="hint">Пост пишется в три шага: факты из коммитов, текст только по ним, проверка. Утверждения сверены с найденными изменениями; если есть замечания, ИИ один раз переписывает текст. Это до 4 запросов к ИИ на пост.</p>
+              <p class="result is-error" id="strict-risk" hidden>Без строгой проверки ИИ не сверяет текст с фактами и не переписывает его: выдуманные детали могут попасть в канал. Числа, версии, даты, имена файлов и ссылки всё равно сверяются кодом.</p>
+            </div>
+
+            <div class="field">
+              <label class="label" for="verify_model">Модель для проверки</label>
+              <input type="text" id="verify_model" name="verify_model" class="input input-mid" autocomplete="off" spellcheck="false" maxlength="100" placeholder="Та же, что пишет пост">
+              <p class="hint">Можно указать более дешёвую модель того же провайдера. Пусто — та же модель.</p>
+            </div>
+
             <div class="section-actions">
               <button type="submit" class="btn btn-primary">Сохранить</button>
               <button type="button" class="btn btn-secondary" data-test="ai">Проверить ИИ</button>
@@ -395,6 +410,19 @@
           <form class="settings-section" id="sec-memory" data-section="memory" novalidate>
             <h2 class="section-title">Память канала</h2>
             <p class="section-note">Журнал того, что канал уже объявлял. ИИ видит его и не выдаёт старое за новое: пишет «доработано» и использует те же названия. Пункты добавляются сами, когда пост уходит в канал.</p>
+            <div class="field">
+              <label class="label" for="journal_days">Глубина журнала</label>
+              <select id="journal_days" name="journal_days" class="input input-short">
+                <option value="30">30 дней</option>
+                <option value="90">90 дней</option>
+                <option value="180">180 дней</option>
+              </select>
+              <p class="hint">ИИ видит пункты журнала за этот срок, самые свежие, не больше 4000 символов.</p>
+            </div>
+            <div class="section-actions">
+              <button type="submit" class="btn btn-primary">Сохранить</button>
+            </div>
+
             <p class="field-value" id="memory-status" aria-live="polite"></p>
             <ul class="memory-list" id="memory-list"></ul>
 

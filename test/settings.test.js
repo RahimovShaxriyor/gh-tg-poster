@@ -144,6 +144,21 @@ describe("Настройки, прокси, дайджест", () => {
     assert.equal(otherClient.status, 401, "другой клиент не заблокирован");
   });
 
+  it("настройки точности: строгая проверка по умолчанию включена, значения проверяются", async () => {
+    const save = (body) => fetch(`${baseUrl}/api/settings`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify(body) });
+    const state = await (await fetch(`${baseUrl}/api/state`, { headers: { cookie } })).json();
+    assert.equal(state.settings.strict_check, "1");
+    assert.equal(state.settings.verify_model, "");
+    assert.equal(state.settings.journal_days, "90");
+    assert.equal((await save({ strict_check: "yes" })).status, 400);
+    assert.equal((await save({ verify_model: "model with spaces" })).status, 400);
+    assert.equal((await save({ strict_check: "0", verify_model: "claude-haiku-5-5", journal_days: "30" })).status, 200);
+    assert.equal(ctx.get("strict_check"), "0");
+    assert.equal(ctx.get("verify_model"), "claude-haiku-5-5");
+    assert.equal((await save({ strict_check: "1", verify_model: "" })).status, 200);
+    assert.equal(ctx.get("verify_model"), "");
+  });
+
   it("дайджест передаёт ctx в buildInput и помечает пост как digest; regen дайджеста идёт с промптом дайджеста", async () => {
     const calls = [];
     const digestCtx = {
