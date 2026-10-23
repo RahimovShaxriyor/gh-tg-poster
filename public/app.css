@@ -817,6 +817,11 @@ kbd {
   font-size: var(--fs-xs);
 }
 
+.is-paused {
+  color: var(--warn);
+  font-weight: 600;
+}
+
 .cost-hint {
   color: var(--text-3);
   font-size: var(--fs-xs);

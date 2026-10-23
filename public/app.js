@@ -519,7 +519,11 @@
     } else {
       parts.push(h("span", {}, "Проверок ещё не было"));
     }
-    if (S.meta.debounceUntil && st.minutes_left > 0) {
+    if (S.settings.paused === "1") {
+      // Пауза ставится командой /pause в боте; снять можно и здесь
+      parts.push(h("span", { class: "is-paused" }, "автопроверка на паузе"));
+      parts.push(h("button", { type: "button", class: "link-btn", onclick: (e) => setPaused(false, e.currentTarget) }, "Возобновить"));
+    } else if (S.meta.debounceUntil && st.minutes_left > 0) {
       parts.push(h("span", {}, `пост через ${st.minutes_left} мин`));
     } else if (S.meta.nextPollIn !== null && S.meta.nextPollIn !== undefined) {
       parts.push(h("span", {}, S.meta.nextPollIn > 0 ? `следующая через ${S.meta.nextPollIn} мин` : "следующая меньше чем через минуту"));
@@ -527,6 +531,18 @@
     if (S.counts.sent_today) parts.push(h("span", {}, `сегодня отправлено ${S.counts.sent_today}`));
     const withSeparators = parts.flatMap((p, i) => (i ? [h("span", { "aria-hidden": "true" }, "·"), p] : [p]));
     line.replaceChildren(...withSeparators);
+  }
+
+  async function setPaused(paused, btn) {
+    await busy(btn, async () => {
+      try {
+        await api("/api/settings", { method: "POST", body: { paused: paused ? "1" : "0" } });
+        toast(paused ? "Автопроверка на паузе." : "Автопроверка возобновлена.");
+        await loadState();
+      } catch (err) {
+        fail(err);
+      }
+    });
   }
 
   function renderFilters() {
