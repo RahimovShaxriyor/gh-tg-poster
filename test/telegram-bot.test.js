@@ -44,7 +44,13 @@ describe("Telegram-бот: привязка владельца и канала, 
     // После привязки — меню команд только для лички владельца
     const reg = calls.find((c) => c.method === "setMyCommands");
     assert.deepEqual(reg.body.scope, { type: "chat", chat_id: 111 });
-    assert.deepEqual(reg.body.commands.map((c) => c.command), ["check", "status", "help"]);
+    const names = reg.body.commands.map((c) => c.command);
+    for (const c of ["check", "status", "help", "drafts", "commits", "pause", "resume", "unbind", "health"]) assert.ok(names.includes(c), c);
+    // Описания на русском и в пределах ограничений Telegram (3–256 символов, имя — a-z, 0-9, _)
+    for (const c of reg.body.commands) {
+      assert.match(c.command, /^[a-z0-9_]{1,32}$/);
+      assert.ok(c.description.length >= 3 && c.description.length <= 256 && /[а-я]/i.test(c.description), c.command);
+    }
 
     // Повторное использование того же кода другим пользователем не работает
     await handleUpdate(startMsg(222, `/start ${code}`, "stranger"), ctx, "123:abc");

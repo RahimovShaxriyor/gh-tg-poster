@@ -221,6 +221,8 @@ describe("Бот в личке: команды /check, /status, /help и кно�
     await handleUpdate(press(OWNER, `pub:${id}:${textHash("Старый")}`), ctx, TOKEN);
     assert.equal(channel.length, 0);
 
+    // Шаг написания начинается после фактов и захода: ждём, пока ИИ начнёт писать текст
+    await waitFor(() => typeof release === "function");
     release();
     await waitIdle(1000);
     await waitFor(() => calls.filter((c) => c.method === "editMessageText").length >= 2);
@@ -232,8 +234,17 @@ describe("Бот в личке: команды /check, /status, /help и кно�
 
   it("«Отклонить»: черновик отклоняется, повторное нажатие сообщает, что пост уже обработан", async () => {
     const id = addDraft();
+    // «Отклонить» — опасное действие: сначала подтверждение с одноразовой кнопкой
     await handleUpdate(press(OWNER, `rej:${id}`), ctx, TOKEN);
+    assert.equal(ctx.post(id).status, "draft", "без подтверждения ничего не меняется");
+    const ask = ownerMessages().at(-1).body;
+    assert.match(ask.text, /Отклонить пост #\d+\?[\s\S]*60 секунд/);
+    const yes = ask.reply_markup.inline_keyboard[0][0].callback_data;
+    await handleUpdate(press(OWNER, yes), ctx, TOKEN);
     assert.equal(ctx.post(id).status, "rejected");
+    // Повтор того же подтверждения и новая кнопка «Отклонить» ничего не делают
+    await handleUpdate(press(OWNER, yes), ctx, TOKEN);
+    assert.match(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).body.text, /Уже выполнено/);
     await handleUpdate(press(OWNER, `rej:${id}`), ctx, TOKEN);
     const last = calls.filter((c) => c.method === "answerCallbackQuery").at(-1).body;
     assert.match(last.text, /уже обработан/);
