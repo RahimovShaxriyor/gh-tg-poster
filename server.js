@@ -8,7 +8,7 @@ const { gh, tg, deleteWebhook, ai, buildInput, sleep } = require("./lib/services
 const { publish, generate, check, waitIdle } = require("./lib/poster");
 const { createApp } = require("./lib/app");
 const { cleanError } = require("./lib/crypto");
-const { handleUpdate } = require("./lib/telegram-bot");
+const { handleUpdate, registerCommands } = require("./lib/telegram-bot");
 
 const PASS = process.env.ADMIN_PASSWORD;
 const SECRET = process.env.SESSION_SECRET || PASS;
@@ -114,6 +114,7 @@ const app = createApp(ctx);
 // Фоновый цикл Telegram: автоопределение канала, команды и кнопки владельца
 let tgLoopRunning = false;
 let lastWebhookDeletedToken = null;
+let commandsRegisteredFor = null;
 
 async function startTgLoop() {
   if (tgLoopRunning) return;
@@ -132,6 +133,14 @@ async function startTgLoop() {
       if (lastWebhookDeletedToken !== token) {
         await deleteWebhook(token);
         lastWebhookDeletedToken = token;
+      }
+
+      // Меню команд в личке владельца: один раз на пару «бот + владелец»
+      const owner = dbBundle.get("tg_owner_chat_id");
+      if (owner && commandsRegisteredFor !== token + "|" + owner) {
+        const reg = await registerCommands(ctx, token);
+        if (reg?.ok) commandsRegisteredFor = token + "|" + owner;
+        else console.error("Не удалось зарегистрировать команды бота:", cleanError(reg?.description));
       }
 
       const r = await tg(

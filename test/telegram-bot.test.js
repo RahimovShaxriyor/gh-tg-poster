@@ -26,10 +26,10 @@ describe("Telegram-бот: привязка владельца и канала, 
     message: { chat: { id: chatId, type: "private" }, from: { id: chatId, username }, text },
   });
 
-  it("/start без кода не делает отправителя владельцем", async () => {
+  it("/start без кода не делает отправителя владельцем, и бот ему не отвечает", async () => {
     await handleUpdate(startMsg(111, "/start"), ctx, "123:abc");
     assert.equal(ctx.get("tg_owner_chat_id"), "");
-    assert.match(calls[0].body.text, /получите код в панели/);
+    assert.deepEqual(calls, []);
   });
 
   it("/start с неверным кодом не привязывает, с верным привязывает, код одноразовый", async () => {
@@ -41,6 +41,10 @@ describe("Telegram-бот: привязка владельца и канала, 
     await handleUpdate(startMsg(111, `/start ${code}`), ctx, "123:abc");
     assert.equal(ctx.get("tg_owner_chat_id"), "111");
     assert.equal(ctx.get("tg_owner_username"), "@owner");
+    // После привязки — меню команд только для лички владельца
+    const reg = calls.find((c) => c.method === "setMyCommands");
+    assert.deepEqual(reg.body.scope, { type: "chat", chat_id: 111 });
+    assert.deepEqual(reg.body.commands.map((c) => c.command), ["check", "status", "help"]);
 
     // Повторное использование того же кода другим пользователем не работает
     await handleUpdate(startMsg(222, `/start ${code}`, "stranger"), ctx, "123:abc");
@@ -84,8 +88,8 @@ describe("Telegram-бот: привязка владельца и канала, 
 
     await handleUpdate({ callback_query: { id: "cb1", from: { id: 222 }, data: `pub:${id}` } }, ctx, "123:abc");
     assert.equal(ctx.post(id).status, "draft");
-    assert.equal(calls.at(-1).method, "answerCallbackQuery");
-    assert.equal(calls.at(-1).body.show_alert, true);
+    // Чужому — только пустой ответ на нажатие (гасит «загрузку»), без текста и сообщений
+    assert.deepEqual(calls, [{ method: "answerCallbackQuery", body: { callback_query_id: "cb1" } }]);
 
     await handleUpdate({ callback_query: { id: "cb2", from: { id: 111 }, data: `pub:${id}` } }, ctx, "123:abc");
     assert.equal(ctx.post(id).status, "sent");
