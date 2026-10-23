@@ -3,6 +3,7 @@
 // а GitHub, Telegram и ИИ подменяются заглушкой, поэтому никакие запросы наружу не уходят.
 //
 // Запуск: node scripts/screenshots.js docs/screens/after
+//         node scripts/screenshots.js docs/screens/commits commits   (только вкладка «Коммиты»)
 // Chrome: переменная CHROME_PATH или стандартный путь для macOS, Linux и Windows.
 
 const { chromium } = require("playwright-core");
@@ -14,6 +15,7 @@ const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
 const OUT_DIR = path.resolve(process.argv[2] || path.join(ROOT, "screenshots"));
+const ONLY = process.argv[3] || "";
 const PORT = 3990 + Math.floor(Math.random() * 9);
 const BASE = `http://127.0.0.1:${PORT}`;
 const PASSWORD = crypto.randomBytes(12).toString("hex");
@@ -35,7 +37,28 @@ const WIDTHS = [
 const THEMES = ["light", "dark"];
 
 // Заглушка внешних API, подключается к серверу через node -r
+// Коммиты для вкладки «Коммиты»: формат GET /repos/{repo}/commits
+const COMMIT_LIST = [
+  ["4f2a9c1e7b3d", "feat: экспорт заметки в Markdown", "anna-dev", 0.6],
+  ["a81c03d9e2f4", "fix: поиск по словам с ё", "anna-dev", 0.9],
+  ["77d0e1f2a3b4", "Merge branch 'feature/export'", "anna-dev", 1.2, 2],
+  ["c4d5e6f7a8b9", "feat: авто тёмная тема", "mikhail-k", 5.2],
+  ["0b1c2d3e4f5a", "perf: синхронизация через websocket", "anna-dev", 26.5],
+  ["9a8b7c6d5e4f", "chore: обновлены зависимости", "renovate[bot]", 27],
+  ["1122334455aa", "ci: кеш npm в GitHub Actions", "mikhail-k", 30.2],
+  ["6677889900bb", "docs: README", "anna-dev", 52.3],
+  ["aa11bb22cc33", "feat: закрепление заметок", "anna-dev", 75.5],
+  ["dd44ee55ff66", "fix: двойная синхронизация при старте", "mikhail-k", 80],
+];
+const commitObj = ([sha, msg, login, h, parents = 1]) => ({
+  sha: sha.padEnd(40, "0"),
+  commit: { message: msg + "\n\nПодробности изменения.", author: { name: login, date: new Date(Date.now() - h * 3600e3).toISOString() } },
+  author: { login },
+  parents: Array.from({ length: parents }, () => ({})),
+});
+
 const STUB = `
+const COMMITS = ${JSON.stringify(COMMIT_LIST.map(commitObj))};
 global.fetch = async (url) => {
   url = String(url);
   const J = (o) => new Response(JSON.stringify(o), { status: 200, headers: { "content-type": "application/json" } });
@@ -47,7 +70,18 @@ global.fetch = async (url) => {
   }
   if (url.includes("api.github.com")) {
     if (url.includes("/user/repos")) return J([{ full_name: "anna-dev/notekeeper", default_branch: "main" }]);
-    if (url.includes("/commits")) return J([{ sha: "4f2a9c1e7b", parents: [{}], commit: { message: "fix: экспорт", committer: { date: new Date().toISOString() } } }]);
+    if (url.includes("/branches")) return J([{ name: "main", protected: true }, { name: "dev", protected: false }]);
+    const one = url.match(/[/]commits[/]([0-9a-f]+)$/);
+    if (one) {
+      const c = COMMITS.find((x) => x.sha.startsWith(one[1]));
+      return J({ ...c, files: [{ filename: "src/export/markdown.js", status: "added", additions: 84, deletions: 0 }, { filename: "src/menu.js", status: "modified", additions: 6, deletions: 2 }] });
+    }
+    if (url.includes("/commits?")) {
+      const u = new URL(url);
+      if (u.searchParams.get("sha") === "release") return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
+      if (u.searchParams.get("author") === "nobody") return J([]);
+      return J(COMMITS);
+    }
     return J({ login: "anna-dev" });
   }
   return J({ content: [{ type: "text", text: "Готово" }], stop_reason: "end_turn" });
@@ -128,8 +162,11 @@ function seedPosts(db, posts) {
   return ids;
 }
 
-async function waitForServer() {
+async function waitForServer(server) {
+  let exited = null;
+  server.once("exit", (code) => (exited = code));
   for (let i = 0; i < 100; i++) {
+    if (exited !== null) throw new Error(`Сервер завершился при запуске (код ${exited})`);
     try {
       if ((await fetch(BASE + "/health")).ok) return;
     } catch {}
@@ -166,7 +203,7 @@ async function main() {
 
   let browser;
   try {
-    await waitForServer();
+    await waitForServer(server);
     const login = await fetch(BASE + "/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -187,7 +224,35 @@ async function main() {
     };
 
     const states = [];
-    for (const size of WIDTHS) {
+    // Вкладка «Коммиты»: загрузка, список, выбор, ошибка, пусто (390 и 1280 px)
+    const commitStates = (size, theme) => {
+      const open = async (page, hash) => {
+        seedPosts(db, POSTS);
+        await page.goto(`${BASE}/${hash}`);
+        await page.waitForSelector("#c-list .c-item, #c-empty:not([hidden])");
+        await page.waitForTimeout(300);
+      };
+      states.push(["commits-loading", size, theme, async (page) => {
+        await page.route("**/api/commits?*", () => {}); // ответ не приходит: остаётся загрузка
+        await page.goto(BASE + "/#commits");
+        await page.waitForTimeout(500);
+      }]);
+      states.push(["commits-list", size, theme, (page) => open(page, "#commits")]);
+      states.push(["commits-selected", size, theme, async (page) => {
+        await open(page, "#commits");
+        await page.click('[data-index="0"] .c-title');
+        await page.click('[data-index="1"] .c-title', { modifiers: ["Shift"] });
+        await page.click('[data-index="4"] .c-expand');
+        await page.waitForSelector(".c-detail .c-files");
+        await page.locator('[data-index="1"]').focus();
+      }]);
+      states.push(["commits-error", size, theme, (page) => open(page, "#commits?branch=release")]);
+      states.push(["commits-empty", size, theme, (page) => open(page, "#commits?author=nobody")]);
+    };
+    if (ONLY === "commits") {
+      for (const size of WIDTHS.filter((w) => w.width !== 1920)) for (const theme of THEMES) commitStates(size, theme);
+    }
+    for (const size of ONLY ? [] : WIDTHS) {
       for (const theme of THEMES) {
         states.push(["empty", size, theme, async (page) => {
           seedPosts(db, []);

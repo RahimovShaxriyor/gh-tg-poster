@@ -357,8 +357,9 @@
 
   // ===== Маршруты: #posts, #posts/12, #settings, #settings/telegram =====
   function applyRoute() {
-    const [view, arg] = location.hash.replace(/^#/, "").split("/");
-    S.view = view === "settings" ? "settings" : "posts";
+    const [path, query = ""] = location.hash.replace(/^#/, "").split("?");
+    const [view, arg] = path.split("/");
+    S.view = ["settings", "commits"].includes(view) ? view : "posts";
     if (S.view === "posts") {
       const id = Number(arg);
       S.selectedId = Number.isInteger(id) && id > 0 ? id : null;
@@ -371,6 +372,7 @@
       if (arg) $(`#sec-${arg}`)?.scrollIntoView({ block: "start" });
       else window.scrollTo(0, 0);
     }
+    if (S.view === "commits") openCommits(new URLSearchParams(query));
   }
 
   function selectPost(id, { replace = false, focus = false } = {}) {
@@ -391,6 +393,7 @@
   function render() {
     $("#view-posts").hidden = S.view !== "posts";
     $("#view-settings").hidden = S.view !== "settings";
+    $("#view-commits").hidden = S.view !== "commits";
     for (const a of $$(".view-link")) {
       if (a.dataset.view === S.view) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
@@ -1634,6 +1637,411 @@
     });
   }
 
+  // ===== Вкладка «Коммиты» =====
+  const MAX_SELECTED = 20;
+  const C = {
+    filters: { branch: "", author: "", since: "", until: "", q: "" },
+    loadedKey: null, // фильтры, для которых загружен список
+    items: [],
+    page: 0,
+    hasMore: false,
+    loading: false,
+    error: null, // { message, code }
+    selected: new Set(),
+    anchor: null,
+    cursor: 0,
+    expanded: new Map(), // sha → { loading } | { error } | { message, files }
+    branches: null,
+    req: 0,
+  };
+  const serverFilters = (f) => JSON.stringify([f.branch, f.author, f.since, f.until]);
+
+  // Фильтры живут в адресе: #commits?branch=…&author=…&since=…&until=…&q=…
+  function writeCommitsHash() {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(C.filters)) if (v) params.set(k, v);
+    const hash = "#commits" + (params.toString() ? "?" + params : "");
+    if (location.hash !== hash) history.replaceState(null, "", hash);
+  }
+
+  function openCommits(params) {
+    const branch = params.get("branch") || S.settings.branch || "";
+    C.filters = { branch, author: params.get("author") || "", since: params.get("since") || "", until: params.get("until") || "", q: params.get("q") || "" };
+    $("#c-author").value = C.filters.author;
+    $("#c-since").value = C.filters.since;
+    $("#c-until").value = C.filters.until;
+    $("#c-q").value = C.filters.q;
+    if (!S.loaded) return; // список загрузится после состояния панели
+    loadBranches();
+    if (C.loadedKey !== serverFilters(C.filters) && !C.loading) loadCommits({ reset: true });
+    else renderCommits();
+  }
+
+  async function loadBranches(refresh = false) {
+    if (C.branches && !refresh) return fillBranches();
+    try {
+      const res = await api("/api/branches" + (refresh ? "?refresh=1" : ""));
+      C.branches = res.branches.map((b) => b.name);
+    } catch {
+      C.branches = null; // без списка веток остаётся текущая
+    }
+    fillBranches();
+  }
+
+  function fillBranches() {
+    const select = $("#c-branch");
+    const names = new Set(C.branches || []);
+    if (C.filters.branch) names.add(C.filters.branch);
+    select.replaceChildren(...[...names].map((n) => h("option", { value: n }, n + (n === S.settings.branch ? " (основная)" : ""))));
+    select.value = C.filters.branch;
+    const other = C.filters.branch && S.settings.branch && C.filters.branch !== S.settings.branch;
+    $("#c-branch-note").hidden = !other;
+    if (other) $("#c-branch-note-text").textContent = `Вы смотрите ветку «${C.filters.branch}». Автоматическая проверка следит за «${S.settings.branch}».`;
+  }
+
+  async function loadCommits({ reset = false, refresh = false } = {}) {
+    const f = C.filters;
+    const key = serverFilters(f);
+    if (reset) {
+      Object.assign(C, { items: [], page: 0, hasMore: false, error: null, cursor: 0, anchor: null });
+      C.expanded.clear();
+    }
+    const page = C.page + 1;
+    const req = ++C.req;
+    C.loading = true;
+    renderCommits();
+    const params = new URLSearchParams({ page });
+    for (const k of ["branch", "author", "since", "until"]) if (f[k]) params.set(k, f[k]);
+    if (refresh) params.set("refresh", "1");
+    try {
+      const res = await api("/api/commits?" + params);
+      if (req !== C.req) return false;
+      const known = new Set(C.items.map((c) => c.sha));
+      C.items.push(...res.commits.filter((c) => !known.has(c.sha)));
+      Object.assign(C, { page, hasMore: res.has_more, loadedKey: key, error: null });
+      return true;
+    } catch (err) {
+      if (req !== C.req) return false;
+      C.error = { message: err.message, code: err.data?.code };
+      C.loadedKey = key;
+      return false;
+    } finally {
+      if (req === C.req) {
+        C.loading = false;
+        renderCommits();
+      }
+    }
+  }
+
+  // «Искать глубже»: догружаем страницы, пока есть, но не дальше 300 коммитов
+  async function searchDeeper(btn) {
+    await busy(btn, async () => {
+      while (C.hasMore && C.items.length < 300) {
+        if (!(await loadCommits())) break;
+      }
+    });
+  }
+
+  const visibleCommits = () => {
+    const q = C.filters.q.trim().toLowerCase();
+    return q ? C.items.filter((c) => c.message.toLowerCase().includes(q) || c.sha.startsWith(q)) : C.items;
+  };
+
+  function renderCommits() {
+    const list = $("#c-list");
+    const empty = $("#c-empty");
+    const items = visibleCommits();
+    const filtersActive = !!(C.filters.author || C.filters.since || C.filters.until || C.filters.q);
+
+    // Строка состояния
+    const status = [];
+    if (C.items.length) status.push(h("span", {}, `Загружено ${C.items.length} ${plural(C.items.length, "коммит", "коммита", "коммитов")}`));
+    if (C.filters.q && C.items.length) {
+      status.push(h("span", {}, `совпадений среди загруженных: ${items.length}`));
+      if (C.hasMore && C.items.length < 300) {
+        status.push(h("button", { type: "button", class: "link-btn", onclick: (e) => searchDeeper(e.currentTarget) }, "Искать глубже"));
+      } else if (C.items.length >= 300) {
+        status.push(h("span", {}, "дальше 300 коммитов поиск не идёт"));
+      }
+    }
+    $("#c-status").replaceChildren(...status.flatMap((p, i) => (i ? [h("span", { "aria-hidden": "true" }, "·"), p] : [p])));
+
+    // Скелетон при первой загрузке
+    if (C.loading && !C.items.length) {
+      list.replaceChildren(...Array.from({ length: 8 }, () => h("li", { class: "skeleton-row", "aria-hidden": "true" },
+        h("span", { class: "skeleton skeleton-text" }), h("span", { class: "skeleton skeleton-text" }))));
+      empty.hidden = true;
+      $("#c-more-box").hidden = true;
+      renderCommitBar();
+      return;
+    }
+
+    // Ветку, которую не удалось загрузить, не предлагаем сделать основной
+    if (C.error && !C.items.length) $("#c-branch-note").hidden = true;
+    list.replaceChildren(...items.map((c, i) => commitRow(c, i)));
+    $("#c-more-box").hidden = !C.hasMore || !!C.error;
+    $("#c-more").textContent = C.loading ? "Загружаю…" : "Показать ещё";
+
+    empty.hidden = items.length > 0;
+    if (!items.length) {
+      empty.replaceChildren(...commitsEmptyState(filtersActive));
+    } else if (C.error) {
+      // Ошибка при догрузке: список остаётся, причина под ним
+      empty.hidden = false;
+      empty.replaceChildren(h("p", { class: "result is-error" }, C.error.message), h("button", { type: "button", class: "btn btn-secondary", onclick: () => loadCommits() }, "Повторить"));
+    }
+    renderCommitBar();
+  }
+
+  function commitsEmptyState(filtersActive) {
+    if (C.loading) return [];
+    const e = C.error;
+    if (e?.code === "no_repo") {
+      return [h("p", { class: "empty-title" }, "Репозиторий не выбран"), h("p", { class: "empty-text" }, "Выберите репозиторий, и здесь появятся его коммиты."),
+        h("a", { class: "btn btn-primary", href: "#settings/github" }, "Открыть настройки")];
+    }
+    if (e?.code === "no_github") {
+      return [h("p", { class: "empty-title" }, "GitHub не подключён"), h("p", { class: "empty-text" }, "Подключите GitHub, чтобы видеть коммиты репозитория."),
+        h("a", { class: "btn btn-primary", href: "/auth/github/create" }, "Подключить GitHub")];
+    }
+    if (e) {
+      return [h("p", { class: "empty-title" }, "Не удалось загрузить коммиты"), h("p", { class: "empty-text" }, e.message),
+        h("button", { type: "button", class: "btn btn-primary", onclick: () => loadCommits({ reset: true, refresh: true }) }, "Повторить")];
+    }
+    if (C.filters.q && C.items.length) {
+      return [h("p", { class: "empty-title" }, "Совпадений нет"),
+        h("p", { class: "empty-text" }, `Среди ${C.items.length} загруженных коммитов нет «${C.filters.q}».`),
+        C.hasMore && C.items.length < 300 ? h("button", { type: "button", class: "btn btn-primary", onclick: (ev) => searchDeeper(ev.currentTarget) }, "Искать глубже") : null];
+    }
+    return [h("p", { class: "empty-title" }, "Коммитов нет"),
+      h("p", { class: "empty-text" }, filtersActive ? "По этим фильтрам ничего не нашлось." : "В этой ветке пока нет коммитов."),
+      filtersActive ? h("button", { type: "button", class: "btn btn-primary", onclick: resetCommitFilters }, "Сбросить фильтры") : null];
+  }
+
+  function resetCommitFilters() {
+    C.filters = { branch: C.filters.branch, author: "", since: "", until: "", q: "" };
+    for (const id of ["c-author", "c-since", "c-until", "c-q"]) $("#" + id).value = "";
+    writeCommitsHash();
+    loadCommits({ reset: true });
+  }
+
+  function commitRow(c, i) {
+    const selected = C.selected.has(c.sha);
+    const exp = C.expanded.get(c.sha);
+    const date = parseDate(c.date);
+    const li = h("li", {
+      class: "c-item",
+      role: "option",
+      id: `commit-${c.sha}`,
+      "aria-selected": String(selected),
+      tabindex: i === C.cursor ? "0" : "-1",
+      dataset: { sha: c.sha, index: i },
+      onclick: (e) => {
+        if (e.target.closest("a, button, .c-detail")) return;
+        C.cursor = i;
+        if (e.shiftKey && C.anchor !== null) selectRange(C.anchor, i);
+        else toggleCommit(c.sha, i);
+      },
+    },
+    h("span", { class: "c-check", "aria-hidden": "true" }),
+    h("div", { class: "c-main" },
+      h("div", { class: "c-line" },
+        h("button", { type: "button", class: "c-sha", title: "Скопировать полный идентификатор", onclick: () => copySha(c.sha) }, c.short),
+        h("span", { class: "c-title" }, c.title),
+        c.merge ? h("span", { class: "tag", title: "Коммит слияния веток" }, "merge") : null,
+        ...c.posts.map((id) => h("a", { class: "c-post-link", href: `#posts/${id}` }, `в посте #${id}`))),
+      h("div", { class: "c-meta" }, [c.author, date ? h("time", { datetime: date.toISOString(), title: fullDate(c.date) }, relLong(c.date)) : null]
+        .filter(Boolean).flatMap((x, k) => (k ? [" · ", x] : [x])))),
+    h("button", {
+      type: "button",
+      class: "c-expand",
+      "aria-expanded": String(!!exp),
+      "aria-label": exp ? "Скрыть подробности" : "Подробности: сообщение и файлы",
+      onclick: () => toggleExpand(c.sha),
+    }, icon("chevron")));
+    if (exp) li.append(commitDetail(exp));
+    return li;
+  }
+
+  function commitDetail(exp) {
+    if (exp.loading) return h("div", { class: "c-detail" }, h("span", { class: "skeleton skeleton-text" }));
+    if (exp.error) return h("div", { class: "c-detail" }, h("p", { class: "result is-error" }, exp.error));
+    return h("div", { class: "c-detail" },
+      h("pre", { class: "c-message" }, exp.message),
+      exp.files.length
+        ? h("ul", { class: "c-files", "aria-label": "Изменённые файлы" }, exp.files.map((f) => h("li", {},
+          h("span", { class: "c-add" }, `+${f.additions}`), h("span", { class: "c-del" }, `−${f.deletions}`), h("span", { class: "c-file" }, f.filename))))
+        : h("p", { class: "hint" }, "Файлов в коммите нет."));
+  }
+
+  async function toggleExpand(sha) {
+    if (C.expanded.has(sha)) {
+      C.expanded.delete(sha);
+      return renderCommits();
+    }
+    C.expanded.set(sha, { loading: true });
+    renderCommits();
+    try {
+      const res = await api(`/api/commits/${sha}`);
+      C.expanded.set(sha, { message: res.message, files: res.files });
+    } catch (err) {
+      if (err.status !== 401) C.expanded.set(sha, { error: err.message });
+    }
+    if (C.expanded.has(sha)) renderCommits();
+  }
+
+  async function copySha(sha) {
+    try {
+      await navigator.clipboard.writeText(sha);
+      toast(`Скопировано: ${sha.slice(0, 7)}`);
+    } catch {
+      toast(`Не удалось скопировать. Идентификатор: ${sha}`, "error");
+    }
+  }
+
+  function toggleCommit(sha, index) {
+    if (C.selected.has(sha)) C.selected.delete(sha);
+    else if (C.selected.size >= MAX_SELECTED) return toast(`За раз можно выбрать не больше ${MAX_SELECTED} коммитов.`, "error");
+    else C.selected.add(sha);
+    C.anchor = index;
+    renderCommits();
+    focusCommitRow();
+  }
+
+  function selectRange(from, to) {
+    const items = visibleCommits();
+    const [a, b] = from < to ? [from, to] : [to, from];
+    for (const c of items.slice(a, b + 1)) {
+      if (C.selected.size >= MAX_SELECTED) {
+        toast(`За раз можно выбрать не больше ${MAX_SELECTED} коммитов.`, "error");
+        break;
+      }
+      C.selected.add(c.sha);
+    }
+    renderCommits();
+    focusCommitRow();
+  }
+
+  function clearSelection() {
+    if (!C.selected.size) return;
+    C.selected.clear();
+    C.anchor = null;
+    renderCommits();
+  }
+
+  function focusCommitRow() {
+    $(`#c-list [data-index="${C.cursor}"]`)?.focus({ preventScroll: false });
+  }
+
+  function commitsKeydown(e) {
+    const items = visibleCommits();
+    if (!items.length) return;
+    if (e.key === "j" || e.key === "k") {
+      e.preventDefault();
+      C.cursor = Math.max(0, Math.min(items.length - 1, C.cursor + (e.key === "j" ? 1 : -1)));
+      renderCommits();
+      focusCommitRow();
+    } else if ((e.key === " " || e.key === "Enter") && e.target.closest?.(".c-item")) {
+      if (e.target.closest("button, a")) return;
+      e.preventDefault();
+      const c = items[C.cursor];
+      if (e.key === " ") toggleCommit(c.sha, C.cursor);
+      else toggleExpand(c.sha).then(focusCommitRow);
+    }
+  }
+
+  function renderCommitBar() {
+    const n = C.selected.size;
+    $("#c-bar").hidden = n === 0;
+    $("#c-count").textContent = `Выбрано: ${n} из ${MAX_SELECTED}`;
+    $("#c-create").textContent = `Создать пост из ${n} ${plural(n, "коммита", "коммитов", "коммитов")}`;
+  }
+
+  async function createFromCommits(btn) {
+    const shas = [...C.selected];
+    const send = (confirm) => api("/api/posts/from-commits", { method: "POST", body: { shas, branch: C.filters.branch, confirm_duplicates: confirm } });
+    await busy(btn, async () => {
+      let res;
+      try {
+        res = await send(false);
+      } catch (err) {
+        if (err.status !== 409) return fail(err);
+        const list = (err.data?.duplicates || []).map((d) => `${d.short} (${d.posts.map((p) => "пост #" + p).join(", ")})`).join(", ");
+        const ok = await confirmDialog({
+          title: "Эти коммиты уже есть в постах",
+          text: `${list}. Создать ещё один пост, в котором они повторятся?`,
+          ok: "Создать всё равно",
+        });
+        if (!ok) return;
+        try {
+          res = await send(true);
+        } catch (err2) {
+          return fail(err2);
+        }
+      }
+      C.selected.clear();
+      C.anchor = null;
+      C.loadedKey = null; // бейджи «в посте #N» обновятся при следующем открытии
+      toast(`Черновик #${res.id} создаётся из ${res.commits} ${plural(res.commits, "коммита", "коммитов", "коммитов")}: ИИ пишет текст.`);
+      await loadState();
+      location.hash = `#posts/${res.id}`;
+    });
+  }
+
+  function initCommits() {
+    $("#c-filters").addEventListener("submit", (e) => {
+      e.preventDefault();
+      loadBranches(true);
+      loadCommits({ reset: true, refresh: true });
+    });
+    const applyFilter = () => {
+      const next = {
+        branch: $("#c-branch").value || C.filters.branch,
+        author: $("#c-author").value.trim(),
+        since: $("#c-since").value,
+        until: $("#c-until").value,
+        q: $("#c-q").value,
+      };
+      const reload = serverFilters(next) !== serverFilters(C.filters);
+      C.filters = next;
+      writeCommitsHash();
+      fillBranches();
+      if (reload) loadCommits({ reset: true });
+      else renderCommits();
+    };
+    for (const id of ["c-branch", "c-author", "c-since", "c-until"]) $("#" + id).addEventListener("change", applyFilter);
+    $("#c-q").addEventListener("input", () => {
+      C.filters.q = $("#c-q").value;
+      C.cursor = 0;
+      writeCommitsHash();
+      renderCommits();
+    });
+    $("#c-more").addEventListener("click", (e) => busy(e.currentTarget, () => loadCommits()));
+    $("#c-clear").addEventListener("click", clearSelection);
+    $("#c-create").addEventListener("click", (e) => createFromCommits(e.currentTarget));
+    $("#c-make-default").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const branch = C.filters.branch;
+      const ok = await confirmDialog({
+        title: `Сделать «${branch}» основной веткой?`,
+        text: "Автоматическая проверка начнёт следить за этой веткой с её последнего коммита: уже сделанные коммиты в посты не попадут.",
+        ok: "Сделать основной",
+        danger: false,
+      });
+      if (!ok) return;
+      await busy(btn, async () => {
+        try {
+          await api("/api/settings", { method: "POST", body: { branch } });
+          toast(`Основная ветка: ${branch}.`);
+          await loadState();
+          fillBranches();
+        } catch (err) {
+          fail(err);
+        }
+      });
+    });
+  }
+
   // ===== Клавиатура =====
   function onKeydown(e) {
     if ($("#confirm").open) return; // Esc и Tab внутри диалога обрабатывает браузер
@@ -1645,6 +2053,11 @@
         return;
       }
       if (S.view === "posts" && isNarrow() && S.selectedId) selectPost(null);
+      if (S.view === "commits" && !isTyping(e.target)) clearSelection();
+      return;
+    }
+    if (S.view === "commits" && !S.loginVisible && !isTyping(e.target) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      commitsKeydown(e);
       return;
     }
     if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey || S.view !== "posts" || S.loginVisible) return;
@@ -1701,6 +2114,7 @@
     window.addEventListener("hashchange", applyRoute);
 
     initSettings();
+    initCommits();
     showReturnMessage();
     if (!location.hash) history.replaceState(null, "", "#posts");
     applyRoute();
@@ -1709,6 +2123,7 @@
         ensureRepos();
         ensureModels();
       }
+      if (S.view === "commits") openCommits(new URLSearchParams(location.hash.split("?")[1] || ""));
       flushSaves();
     });
   }

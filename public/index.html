@@ -20,6 +20,7 @@
     <symbol id="i-logout" viewBox="0 0 16 16"><path d="M6 14H3.5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1H6M10.5 11l3-3-3-3M13.5 8H6"/></symbol>
     <symbol id="i-trash" viewBox="0 0 16 16"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4"/></symbol>
     <symbol id="i-external" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5l-6 6M12 9.5v3.5a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V4.5A.5.5 0 0 1 3 4h3.5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
     <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></symbol>
     <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 1.8 14.8 13.5H1.2zM8 6v3.5M8 11.5v.01"/></symbol>
     <symbol id="i-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.5v4M8 5v.01"/></symbol>
@@ -46,6 +47,7 @@
 
       <nav class="views" aria-label="Разделы">
         <a href="#posts" class="view-link" data-view="posts">Посты<span class="count" id="nav-drafts"></span></a>
+        <a href="#commits" class="view-link" data-view="commits">Коммиты</a>
         <a href="#settings" class="view-link" data-view="settings">Настройки</a>
       </nav>
 
@@ -110,6 +112,55 @@
         </div>
 
         <div class="detail-pane" id="detail" tabindex="-1"></div>
+      </section>
+
+      <!-- КОММИТЫ: ручной выбор коммитов для поста -->
+      <section class="view view-commits" id="view-commits" aria-label="Коммиты" hidden>
+        <div class="commits-pane">
+          <form class="c-filters" id="c-filters" novalidate>
+            <div class="c-field">
+              <label class="label" for="c-branch">Ветка</label>
+              <select id="c-branch" class="input"></select>
+            </div>
+            <div class="c-field">
+              <label class="label" for="c-author">Автор</label>
+              <input type="text" id="c-author" class="input" placeholder="логин или email" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="c-field">
+              <label class="label" for="c-since">С даты</label>
+              <input type="date" id="c-since" class="input">
+            </div>
+            <div class="c-field">
+              <label class="label" for="c-until">По дату</label>
+              <input type="date" id="c-until" class="input">
+            </div>
+            <div class="c-field c-field-wide">
+              <label class="label" for="c-q">Поиск по сообщению</label>
+              <input type="search" id="c-q" class="input" placeholder="Среди загруженных коммитов" autocomplete="off">
+            </div>
+            <div class="c-field c-field-btn">
+              <button type="submit" class="btn btn-secondary" id="c-refresh"><svg class="i"><use href="#i-refresh"/></svg>Обновить</button>
+            </div>
+          </form>
+          <div class="c-branch-note" id="c-branch-note" hidden>
+            <span id="c-branch-note-text"></span>
+            <button type="button" class="btn btn-ghost btn-sm" id="c-make-default">Сделать основной</button>
+          </div>
+          <p class="status-line" id="c-status" aria-live="polite"></p>
+
+          <ul class="c-list" id="c-list" role="listbox" aria-multiselectable="true" aria-label="Коммиты ветки"></ul>
+          <div class="list-empty" id="c-empty" hidden></div>
+          <div class="list-more" id="c-more-box" hidden>
+            <button type="button" class="btn btn-secondary btn-block" id="c-more">Показать ещё</button>
+          </div>
+          <p class="list-hint hide-narrow">Клик или пробел — выбрать, Shift+клик — диапазон, Enter — подробности, <kbd>j</kbd> и <kbd>k</kbd> — по списку, Esc — снять выбор.</p>
+        </div>
+
+        <div class="c-bar" id="c-bar" hidden>
+          <span class="c-count" id="c-count"></span>
+          <button type="button" class="btn btn-ghost" id="c-clear">Снять выбор</button>
+          <button type="button" class="btn btn-primary" id="c-create"></button>
+        </div>
       </section>
 
       <!-- НАСТРОЙКИ -->
