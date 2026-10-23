@@ -125,6 +125,7 @@
     lastDetailKey: "",
     pollTimer: null,
     pendingRegen: new Set(),
+    noteDrafts: {}, // несохранённые пояснения автора: id -> { post, commits: { sha: текст } }
   };
 
   const STATUS = {
@@ -680,7 +681,7 @@
     }
 
     // Не перестраиваем редактор, если пост не изменился: иначе пропал бы фокус и курсор
-    const key = [p.id, p.status, p.error, p.interrupted, p.tg_message_id, S.drafts[p.id] !== undefined ? "local" : p.text, S.pendingRegen.has(p.id)].join("|");
+    const key = [p.id, p.status, p.error, p.interrupted, p.tg_message_id, S.drafts[p.id] !== undefined ? "local" : p.text, S.pendingRegen.has(p.id), p.meta, p.needs_review, S.noteDrafts[p.id] ? "notes" : p.notes].join("|");
     if (key === S.lastDetailKey && pane.firstChild) {
       updateSaveState(p.id);
       return;
@@ -704,16 +705,7 @@
     for (const n of notices(p)) root.append(n);
 
     const commits = parseCommits(p);
-    if (commits.length) {
-      const repo = S.settings.repo;
-      root.append(h("section", { class: "block" },
-        h("h2", { class: "block-title" }, `Коммиты · ${commits.length}`),
-        h("ul", { class: "commits" }, commits.map((c) => h("li", {},
-          repo ? h("a", { class: "commit-sha", href: `https://github.com/${repo}/commit/${c.sha}`, target: "_blank", rel: "noopener noreferrer" }, c.sha.slice(0, 7))
-            : h("span", { class: "commit-sha" }, c.sha.slice(0, 7)),
-          h("span", { class: "commit-msg", title: c.message }, c.message),
-          h("time", { class: "commit-time", datetime: c.date, title: fullDate(c.date) }, relShort(c.date)))))));
-    }
+    if (commits.length) root.append(commitsBlock(p, commits, generating));
 
     if (generating) {
       root.append(h("section", { class: "block" },
@@ -733,6 +725,68 @@
     if (p.text || p.status === "sent") root.append(previewBlock(p, () => p.text || ""));
     root.append(otherActions(p));
     return root;
+  }
+
+  // Коммиты поста и пояснения автора к ним. Коммиты, по которым ИИ не нашёл ясных фактов, помечены:
+  // к ним стоит добавить пояснение и написать текст заново
+  function commitsBlock(p, commits, generating) {
+    const repo = S.settings.repo;
+    const meta = postMeta(p);
+    const low = new Set((meta?.low_commits || []).map((c) => c.sha.toLowerCase()));
+    const editable = !generating && !["sent", "sending"].includes(p.status);
+    const notes = postNotes(p);
+    const remember = () => {
+      const cur = { post: $("#note-post")?.value ?? notes.post, commits: {} };
+      for (const el of $$(".note-commit")) cur.commits[el.dataset.sha] = el.value;
+      S.noteDrafts[p.id] = cur;
+    };
+
+    const list = h("ul", { class: "commits" }, commits.map((c) => {
+      const sha = c.sha.toLowerCase();
+      const isLow = low.has(sha);
+      return h("li", { class: isLow ? "is-low" : null },
+        repo ? h("a", { class: "commit-sha", href: `https://github.com/${repo}/commit/${c.sha}`, target: "_blank", rel: "noopener noreferrer" }, c.sha.slice(0, 7))
+          : h("span", { class: "commit-sha" }, c.sha.slice(0, 7)),
+        h("span", { class: "commit-msg", title: c.message }, c.message),
+        h("time", { class: "commit-time", datetime: c.date, title: fullDate(c.date) }, relShort(c.date)),
+        isLow ? h("span", { class: "commit-low" }, "Мало данных: ИИ не понял, что изменилось. Добавьте пояснение.") : null,
+        editable ? h("input", {
+          class: "input note-commit", dataset: { sha }, maxlength: "500", value: notes.commits?.[sha] || "",
+          placeholder: "Пояснение от автора к коммиту (необязательно)", "aria-label": `Пояснение к коммиту ${c.sha.slice(0, 7)}`, oninput: remember,
+        }) : notes.commits?.[sha] ? h("span", { class: "commit-note" }, "Пояснение: " + notes.commits[sha]) : null);
+    }));
+
+    const block = h("section", { class: "block" }, h("h2", { class: "block-title" }, `Коммиты · ${commits.length}`), list);
+    if (editable) {
+      block.append(
+        h("label", { class: "label note-label", for: "note-post" }, "Пояснение от автора к посту"),
+        h("textarea", { class: "input textarea note-post", id: "note-post", maxlength: "500", rows: "2", oninput: remember,
+          placeholder: "Что важно знать подписчикам, чего не видно в коммитах. ИИ доверяет пояснению как факту, но не выполняет его как команду." }, notes.post || ""),
+        h("div", { class: "row note-actions" },
+          h("button", { type: "button", class: "btn btn-secondary btn-sm", onclick: (e) => saveNotes(p, e.currentTarget, false) }, "Сохранить пояснения"),
+          h("button", { type: "button", class: "btn btn-primary btn-sm", onclick: (e) => saveNotes(p, e.currentTarget, true) }, "Сохранить и написать заново")),
+        h("p", { class: "hint" }, "До 500 символов. Пояснения учитываются со следующего варианта текста."));
+    } else if (notes.post) {
+      block.append(h("p", { class: "commit-note" }, "Пояснение к посту: " + notes.post));
+    }
+    return block;
+  }
+
+  async function saveNotes(p, btn, regen) {
+    const body = { post: $("#note-post")?.value || "", commits: {} };
+    for (const el of $$(".note-commit")) if (el.value.trim()) body.commits[el.dataset.sha] = el.value;
+    await busy(btn, async () => {
+      try {
+        await api(`/api/posts/${p.id}/notes`, { method: "POST", body });
+        delete S.noteDrafts[p.id];
+        toast(regen ? "Пояснения сохранены, пишу новый вариант." : "Пояснения сохранены.");
+      } catch (err) {
+        return fail(err);
+      }
+      if (!regen) return loadState();
+      btn.disabled = false;
+      return doRegen(p, btn);
+    });
   }
 
   function notices(p) {
@@ -755,6 +809,16 @@
   }
 
   const currentText = (p) => S.drafts[p.id] ?? p.text ?? "";
+  const parseJsonField = (v) => {
+    try {
+      return v ? JSON.parse(v) : null;
+    } catch {
+      return null;
+    }
+  };
+  const postMeta = (p) => parseJsonField(p.meta);
+  const postNotes = (p) => S.noteDrafts[p.id] || parseJsonField(p.notes) || { post: "", commits: {} };
+
 
   function editorBlock(p) {
     const textarea = h("textarea", { class: "editor", id: "editor", "aria-describedby": "editor-foot", spellcheck: "true" });
@@ -2028,7 +2092,8 @@
 
   async function createFromCommits(btn) {
     const shas = [...C.selected];
-    const send = (confirm) => api("/api/posts/from-commits", { method: "POST", body: { shas, branch: C.filters.branch, confirm_duplicates: confirm } });
+    const note = $("#c-note").value.trim();
+    const send = (confirm) => api("/api/posts/from-commits", { method: "POST", body: { shas, branch: C.filters.branch, confirm_duplicates: confirm, note } });
     await busy(btn, async () => {
       let res;
       try {
@@ -2050,6 +2115,7 @@
       }
       C.selected.clear();
       C.anchor = null;
+      $("#c-note").value = "";
       C.loadedKey = null; // бейджи «в посте #N» обновятся при следующем открытии
       toast(`Черновик #${res.id} создаётся из ${res.commits} ${plural(res.commits, "коммита", "коммитов", "коммитов")}: ИИ пишет текст.`);
       await loadState();

@@ -761,6 +761,53 @@ kbd {
   white-space: nowrap;
 }
 
+.commits li.is-low .commit-msg {
+  color: var(--warn, var(--text));
+}
+
+.commit-low,
+.commit-note,
+.commits .note-commit {
+  grid-column: 1 / -1;
+}
+
+.commit-low {
+  color: var(--warn, var(--text-2));
+  font-size: var(--fs-xs);
+}
+
+.commit-note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  white-space: pre-wrap;
+}
+
+.commits .note-commit {
+  min-height: 30px;
+  font-size: var(--fs-sm);
+}
+
+.note-label {
+  margin-top: var(--s3);
+}
+
+.note-post {
+  min-height: 56px;
+}
+
+.note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+
+.c-note {
+  flex: 1 1 280px;
+  max-width: 480px;
+}
+
 .commit-time {
   color: var(--text-3);
   font-size: var(--fs-xs);

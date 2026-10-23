@@ -317,6 +317,17 @@ describe("Вкладка «Коммиты»: сервер", () => {
     assert.match(ctx.post(id).error, /пустой ответ/);
   });
 
+  it("пояснение автора к посту из вкладки «Коммиты»: хранится с постом и уходит к ИИ блоком <author_note>", async () => {
+    handler = commitDetails;
+    const long = await post("/api/posts/from-commits", { shas: [sha("a")], note: "x".repeat(501) });
+    assert.equal(long.status, 400);
+    const { id } = await (await post("/api/posts/from-commits", { shas: [sha("a")], note: "  Экспорт для отчётов  " })).json();
+    await poster.waitIdle(2000);
+    restore();
+    assert.deepEqual(JSON.parse(ctx.post(id).notes), { post: "Экспорт для отчётов", commits: {} });
+    assert.match(aiInputs.at(-1).input, /<\/changes>\n\n<author_note scope="post">\nЭкспорт для отчётов\n<\/author_note>$/);
+  });
+
   it("бюджет diff: не больше общего лимита символов", async () => {
     detail[sha("c")] = { ...commit(sha("c"), "big"), files: Array.from({ length: 10 }, (_, i) => ({ filename: `f${i}.js`, status: "modified", additions: 1, deletions: 0, patch: "x".repeat(3000) })) };
     handler = commitDetails;
