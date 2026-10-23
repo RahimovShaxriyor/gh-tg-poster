@@ -1313,6 +1313,20 @@
       $("#verify_model").value = s.verify_model || "";
     });
 
+    fill("style", () => {
+      $("#audience").value = s.audience || "mixed";
+      $("#voice").value = s.voice || "";
+      $("#tone").value = s.tone || "";
+      $("#banned_words").value = s.banned_words || "";
+      $("#emoji").value = s.emoji || "few";
+      $("#cta").value = s.cta || "none";
+      let samples = [];
+      try {
+        samples = JSON.parse(s.style_samples || "[]");
+      } catch {}
+      $$(".style-sample").forEach((el, i) => (el.value = samples[i] || ""));
+    });
+
     fill("memory", () => {
       $("#journal_days").value = s.journal_days || "90";
     });
@@ -1323,7 +1337,6 @@
       $("#digest_tz").value = s.digest_tz || "Europe/Moscow";
       $("#poll_interval").value = s.poll_interval || "5";
       $("#debounce").value = s.debounce || "10";
-      $("#tone").value = s.tone || "";
       $("#digest-fields").hidden = $("#mode").value !== "digest";
     });
 
@@ -1639,11 +1652,16 @@
         if (!ok) return undefined;
       }
     }
+    if (section === "style") {
+      for (const k of ["audience", "voice", "tone", "banned_words", "emoji", "cta"]) payload[k] = v(k);
+      const samples = $$(".style-sample").map((el) => el.value.trim()).filter(Boolean);
+      payload.style_samples = samples.length ? JSON.stringify(samples) : "";
+    }
     if (section === "memory") {
       payload.journal_days = v("journal_days");
     }
     if (section === "behavior") {
-      for (const k of ["mode", "digest_time", "digest_tz", "poll_interval", "debounce", "tone"]) payload[k] = v(k);
+      for (const k of ["mode", "digest_time", "digest_tz", "poll_interval", "debounce"]) payload[k] = v(k);
       if (payload.mode === "auto" && S.settings.mode !== "auto") {
         const ok = await confirmDialog({
           title: "Публиковать без проверки?",
@@ -1763,7 +1781,7 @@
     for (const btn of $$("[data-preset]")) {
       btn.addEventListener("click", () => {
         $("#tone").value = btn.dataset.preset;
-        S.dirty.add("behavior");
+        S.dirty.add("style");
       });
     }
 

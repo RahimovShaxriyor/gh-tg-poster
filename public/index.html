@@ -170,7 +170,8 @@
           <a href="#settings/github" class="settings-link" data-section="github">GitHub</a>
           <a href="#settings/telegram" class="settings-link" data-section="telegram">Telegram</a>
           <a href="#settings/ai" class="settings-link" data-section="ai">ИИ</a>
-          <a href="#settings/behavior" class="settings-link" data-section="behavior">Проверка и стиль</a>
+          <a href="#settings/behavior" class="settings-link" data-section="behavior">Проверка</a>
+          <a href="#settings/style" class="settings-link" data-section="style">Канал и стиль</a>
           <a href="#settings/memory" class="settings-link" data-section="memory">Память канала</a>
           <a href="#settings/security" class="settings-link" data-section="security">Безопасность</a>
         </nav>
@@ -345,8 +346,8 @@
 
           <!-- Проверка и стиль -->
           <form class="settings-section" id="sec-behavior" data-section="behavior" novalidate>
-            <h2 class="section-title">Проверка и стиль</h2>
-            <p class="section-note">Как часто смотреть в GitHub и как писать посты.</p>
+            <h2 class="section-title">Проверка</h2>
+            <p class="section-note">Как часто смотреть в GitHub и когда публиковать.</p>
 
             <div class="field">
               <label class="label" for="mode">Режим</label>
@@ -391,6 +392,31 @@
             </div>
             <p class="hint hint-tight">Пост пишется, когда после последнего коммита прошла пауза: серия коммитов попадёт в один пост. Команда /check в боте паузу не ждёт.</p>
 
+            <div class="section-actions">
+              <button type="submit" class="btn btn-primary">Сохранить</button>
+            </div>
+          </form>
+
+          <!-- Канал и стиль: профиль канала -->
+          <form class="settings-section" id="sec-style" data-section="style" novalidate>
+            <h2 class="section-title">Канал и стиль</h2>
+            <p class="section-note">Для кого и как писать. ИИ получает это как описание канала, а утверждения в посте всё равно берёт только из фактов.</p>
+
+            <div class="field">
+              <label class="label" for="audience">Кто читает</label>
+              <select id="audience" name="audience" class="input input-mid">
+                <option value="dev">Разработчики</option>
+                <option value="users">Клиенты или пользователи продукта</option>
+                <option value="mixed">Смешанная</option>
+              </select>
+              <p class="hint">Для пользователей названия классов, DTO, endpoint и подобное заменяются человеческими словами. Для разработчиков термины можно, но каждый объясняется: зачем это читателю.</p>
+            </div>
+
+            <div class="field">
+              <label class="label" for="voice">Голос</label>
+              <input type="text" id="voice" name="voice" class="input" maxlength="300" placeholder="Например: дружелюбно, на «вы», с лёгкой иронией">
+            </div>
+
             <div class="field">
               <label class="label" for="tone">Пожелания к стилю</label>
               <textarea id="tone" name="tone" class="input textarea" rows="4" placeholder="Например: коротко, без приветствий, в конце ссылка на релиз."></textarea>
@@ -398,6 +424,38 @@
                 <button type="button" class="btn btn-ghost btn-sm" data-preset="Пиши максимально лаконично, списком ключевых изменений, без приветствий и лишних клише.">Кратко</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-preset="Пиши увлекательно и живо, для широкой аудитории разработчиков, подчеркни практическую пользу новых улучшений.">Живо</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-preset="Формат Release Notes: номер версии, перечень Breaking Changes, Новые возможности и Исправления с кратким техническим описанием.">Release notes</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="label" for="style_sample_1">Образцы стиля</label>
+              <textarea id="style_sample_1" class="input textarea style-sample" rows="4" maxlength="1500" placeholder="Вставьте пост, который вам нравится (свой или чужой)"></textarea>
+              <textarea id="style_sample_2" class="input textarea style-sample" rows="4" maxlength="1500" placeholder="Второй образец (необязательно)" aria-label="Второй образец стиля"></textarea>
+              <textarea id="style_sample_3" class="input textarea style-sample" rows="4" maxlength="1500" placeholder="Третий образец (необязательно)" aria-label="Третий образец стиля"></textarea>
+              <p class="hint">До 3 постов, каждый до 1500 символов. ИИ перенимает манеру, но факты и числа из образцов не берёт.</p>
+            </div>
+
+            <div class="field">
+              <label class="label" for="banned_words">Запретные слова и обороты</label>
+              <textarea id="banned_words" name="banned_words" class="input textarea" rows="2" maxlength="500" placeholder="Через запятую: революционный, не пропустите, встречайте"></textarea>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label class="label" for="emoji">Эмодзи</label>
+                <select id="emoji" name="emoji" class="input input-short">
+                  <option value="none">Нет</option>
+                  <option value="few">Мало (до 2)</option>
+                  <option value="many">Много (до 6)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="label" for="cta">Призыв в конце</label>
+                <select id="cta" name="cta" class="input input-short">
+                  <option value="question">Вопрос читателям</option>
+                  <option value="link">Ссылка на репозиторий</option>
+                  <option value="none">Нет</option>
+                </select>
               </div>
             </div>
 

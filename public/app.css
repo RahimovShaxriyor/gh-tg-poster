@@ -788,6 +788,10 @@ kbd {
   font-size: var(--fs-sm);
 }
 
+.style-sample + .style-sample {
+  margin-top: var(--s2);
+}
+
 .note-label {
   margin-top: var(--s3);
 }
