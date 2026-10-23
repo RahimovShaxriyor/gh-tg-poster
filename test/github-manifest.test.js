@@ -4,7 +4,7 @@ const http = require("node:http");
 const crypto = require("node:crypto");
 const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
-const { appCredentials, clearInstallationTokenCache, consumeState } = require("../lib/github-app");
+const { appCredentials, appManifest, clearInstallationTokenCache, consumeState } = require("../lib/github-app");
 const { publicBaseUrl } = require("../lib/notify");
 
 const PASS = "manifest-test-password";
@@ -145,7 +145,28 @@ describe("Подключение GitHub в одну кнопку (App Manifest)"
     assert.equal(manifest.public, false);
     assert.deepEqual(manifest.default_permissions, { contents: "read", metadata: "read" });
     assert.deepEqual(manifest.default_events, []);
-    assert.equal(manifest.hook_attributes.active, false);
+    assert.equal("hook_attributes" in manifest, false);
+  });
+
+  it("состав манифеста: без вебхука и callback-адресов, права только на чтение, адреса от BASE_URL", () => {
+    for (const base of ["http://localhost:3000", "https://poster.example.org"]) {
+      const m = appManifest(base, "abc123");
+      assert.deepEqual(Object.keys(m).sort(), [
+        "default_events", "default_permissions", "name", "public", "redirect_url", "setup_on_update", "setup_url", "url",
+      ]);
+      assert.equal("hook_attributes" in m, false);
+      assert.equal("callback_urls" in m, false);
+      assert.deepEqual(m.default_permissions, { contents: "read", metadata: "read" });
+      assert.deepEqual(m.default_events, []);
+      assert.equal(m.redirect_url, `${base}/auth/github/manifest`);
+      assert.equal(m.setup_url, `${base}/auth/github/setup`);
+      assert.equal(m.url, base);
+      assert.equal(m.public, false);
+      assert.equal(m.name, "gh-tg-poster-abc123");
+      // Кроме домашней страницы и двух адресов для браузера, адресов в манифесте нет
+      const urls = JSON.stringify(m).match(/https?:\/\/[^"]+/g);
+      assert.deepEqual(urls.sort(), [base, `${base}/auth/github/manifest`, `${base}/auth/github/setup`].sort());
+    }
   });
 
   it("без ENCRYPTION_KEY страница предупреждает и не отправляет форму сама", async () => {
