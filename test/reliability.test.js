@@ -360,6 +360,16 @@ describe("Внешние сервисы: повторы и защита пром
     await assert.rejects(() => services.ai("x", false, { key: "k", model: "m" }), /лимите токенов/);
   });
 
+  it("ИИ: лимит токенов с запасом под рассуждение; отказ модели — понятная ошибка", async () => {
+    let body;
+    global.fetch = async (url, opts) => {
+      body = JSON.parse(opts.body);
+      return new Response(JSON.stringify({ content: [], stop_reason: "refusal" }));
+    };
+    await assert.rejects(() => services.ai("x", false, { key: "k", model: "claude-sonnet-5-5" }), /отказался/);
+    assert.ok(body.max_tokens >= 16000);
+  });
+
   it("cleanError скрывает fine-grained токены GitHub", () => {
     assert.equal(cleanError("token github_pat_11ABC_def123 bad").includes("github_pat_"), false);
   });
