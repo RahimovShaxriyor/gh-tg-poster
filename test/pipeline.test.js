@@ -28,14 +28,16 @@ describe("Конвейер: факты → текст → проверка", () 
     assert.equal(r.status, "draft");
     assert.equal(r.text, "Появился экспорт в Markdown");
     assert.equal(r.needsReview, false);
-    assert.deepEqual(calls.map((c) => c.step), ["facts", "write", "verify"]);
-    assert.deepEqual(calls.map((c) => c.temperature), [0, 0.3, 0]);
+    assert.deepEqual(calls.map((c) => c.step), ["facts", "angles", "write", "verify"]);
+    // Точность (факты, проверка) — при нулевой температуре, подача — выше
+    assert.deepEqual(calls.map((c) => c.temperature), [0, 0.8, 0.6, 0]);
     assert.match(calls[0].user, /^<changes>\n/);
     assert.match(calls[0].user, /- \[aaaaaaa\] feat: экспорт в Markdown\n {2}Кнопка «Экспорт» в меню файла/);
     assert.match(calls[1].user, /^<facts>\n/);
-    assert.match(calls[2].user, /<post>\nПоявился экспорт в Markdown\n<\/post>/);
+    assert.match(calls[2].user, /^<facts>\n/);
+    assert.match(calls[3].user, /<post>\nПоявился экспорт в Markdown\n<\/post>/);
     assert.equal(r.meta.check.status, "ok");
-    assert.equal(r.meta.calls, 3);
+    assert.equal(r.meta.calls, 4);
   });
 
   it("разбор JSON: целиком, из ```json, внутри текста; мусор — null", () => {
@@ -109,7 +111,7 @@ describe("Конвейер: факты → текст → проверка", () 
     const calls = [];
     const r = await run({ force: true, call: fakeAi({ facts: [fact("f1", { user_visible: false })], calls }) });
     assert.equal(r.status, "draft");
-    assert.match(calls[1].system, /Пост нужен в любом случае: напиши кратко и честно только по этим фактам/);
+    assert.match(calls.find((c) => c.step === "write").system, /Пост нужен в любом случае: напиши кратко и честно только по этим фактам/);
   });
 
   it("force без high-фактов — ошибка «добавьте пояснение автора», ИИ не пишет текст", async () => {
@@ -143,7 +145,7 @@ describe("Конвейер: факты → текст → проверка", () 
     assert.equal(r.needsReview, true);
   });
 
-  it("замечания проверки: ровно одна перегенерация, всего 4 вызова; исправленный текст — без замечаний", async () => {
+  it("замечания проверки: ровно одна перегенерация, всего 5 вызовов; исправленный текст — без замечаний", async () => {
     const calls = [];
     const r = await run({
       call: fakeAi({
@@ -153,17 +155,17 @@ describe("Конвейер: факты → текст → проверка", () 
         calls,
       }),
     });
-    assert.deepEqual(calls.map((c) => c.step), ["facts", "write", "verify", "write"]);
-    assert.match(calls[3].user, /<previous_text>\nЭкспорт стал в два раза быстрее\n<\/previous_text>/);
-    assert.match(calls[3].user, /<review_notes>\n- «в два раза быстрее»: нет в фактах\n<\/review_notes>/);
+    assert.deepEqual(calls.map((c) => c.step), ["facts", "angles", "write", "verify", "write"]);
+    assert.match(calls[4].user, /<previous_text>\nЭкспорт стал в два раза быстрее\n<\/previous_text>/);
+    assert.match(calls[4].user, /<review_notes>\n- «в два раза быстрее»: нет в фактах\n<\/review_notes>/);
     assert.equal(r.status, "draft");
     assert.equal(r.text, "Появился экспорт");
     assert.equal(r.needsReview, false);
     assert.equal(r.meta.check.regenerated, true);
-    assert.equal(r.meta.calls, 4);
+    assert.equal(r.meta.calls, 5);
   });
 
-  it("замечания остались после перегенерации — draft с needs_review и проблемными фразами, пятого вызова нет", async () => {
+  it("замечания остались после перегенерации — draft с needs_review и проблемными фразами, шестого вызова нет", async () => {
     const calls = [];
     const r = await run({
       call: fakeAi({
@@ -173,7 +175,7 @@ describe("Конвейер: факты → текст → проверка", () 
         calls,
       }),
     });
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 5);
     assert.equal(r.status, "draft");
     assert.equal(r.needsReview, true);
     assert.equal(r.meta.check.status, "needs_review");
@@ -191,7 +193,7 @@ describe("Конвейер: факты → текст → проверка", () 
   it("строгая проверка выключена: без вызова проверки и перегенерации, кодовая сверка всё равно подсвечивает", async () => {
     const calls = [];
     const r = await run({ strict: false, call: fakeAi({ facts: [fact("f1")], text: "Версия 3.0 уже доступна", calls }) });
-    assert.deepEqual(calls.map((c) => c.step), ["facts", "write"]);
+    assert.deepEqual(calls.map((c) => c.step), ["facts", "angles", "write"]);
     assert.equal(r.needsReview, true);
     assert.deepEqual(r.meta.check.issues.map((i) => i.quote), ["3.0"]);
     const clean = await run({ strict: false, call: fakeAi({ facts: [fact("f1")], text: "Экспорт готов" }) });
@@ -343,7 +345,7 @@ describe("generate(): конвейер в постах", () => {
     const meta = JSON.parse(p.meta);
     assert.deepEqual(meta.facts.map((f) => f.id), ["f1"]);
     assert.deepEqual(meta.check.issues.map((i) => i.quote), ["7"]);
-    assert.deepEqual(calls.map((c) => c.model), ["main-model", "main-model", "cheap-model", "main-model"]);
+    assert.deepEqual(calls.map((c) => c.model), ["main-model", "main-model", "main-model", "cheap-model", "main-model"]);
   });
 
   it("пустой ответ ИИ — failed, а не skipped", async () => {

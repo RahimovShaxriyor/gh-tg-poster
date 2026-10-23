@@ -47,7 +47,7 @@ describe("Регрессия режимов с конвейером", () => {
     const p = ctx.post(res.posts[0].id);
     assert.equal(p.status, "draft");
     assert.equal(p.text, "Появился экспорт в Markdown");
-    assert.deepEqual(calls.map((c) => c.step), ["facts", "write", "verify"]);
+    assert.deepEqual(calls.map((c) => c.step), ["facts", "angles", "write", "verify"]);
     assert.match(calls[0].user, /- \[1111111\] feat: экспорт в Markdown/);
     assert.equal(channel.length, 0);
     assert.equal(owner[0].reply_markup.inline_keyboard[0][0].text, "Опубликовать");
@@ -87,11 +87,11 @@ describe("Регрессия режимов с конвейером", () => {
     assert.match(calls.find((c) => c.step === "write").system, /дайджест изменений за день/);
   });
 
-  it("строгая проверка выключена в настройках — два вызова ИИ вместо трёх", async () => {
+  it("строгая проверка выключена в настройках — без вызова проверки", async () => {
     const calls = [];
     const { ctx } = makeCtx(fakeAi({ text: "Появился экспорт", calls }), "approve");
     ctx.set("strict_check", "0");
     await poster.check(true, ctx);
-    assert.deepEqual(calls.map((c) => c.step), ["facts", "write"]);
+    assert.deepEqual(calls.map((c) => c.step), ["facts", "angles", "write"]);
   });
 });

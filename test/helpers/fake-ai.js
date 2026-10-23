@@ -3,6 +3,7 @@
 
 const STEP_BY_PROMPT = [
   ["Задача: извлечь факты", "facts"],
+  ["Задача: придумать заходы", "angles"],
   ["Задача: написать пост", "write"],
   ["Задача: проверить пост", "verify"],
   ["Задача: выписать объявленное", "extract"],
@@ -23,10 +24,17 @@ const defaultFacts = (req) => {
  *   text: строка поста или функция (req, n) → строка; "SKIP" → {"skip":true}; null → пустой ответ
  *   facts: массив фактов или функция (req) → массив; строка — отдаётся как есть
  *   unsupported: массив замечаний проверки или функция (req, n) → массив
- *   raw: { facts?, write?, verify? } — ответ шага строкой как есть
+ *   angles: массив заходов или функция (req) → массив; строка — отдаётся как есть
+ *   raw: { facts?, angles?, write?, verify? } — ответ шага строкой как есть
  *   calls: массив, куда пишутся запросы { step, system, user, model, temperature }
  */
-function fakeAi({ text = "Готовый пост", facts = defaultFacts, unsupported = [], raw = {}, calls = [] } = {}) {
+const defaultAngles = [
+  { type: "benefit", name: "Польза", hook: "Теперь это можно сделать быстрее", idea: "Что читатель может сделать" },
+  { type: "story", name: "Закулисье", hook: "Как появилась новая возможность", idea: "Как это устроено" },
+  { type: "question", name: "Вопрос", hook: "Часто делаете это вручную?", idea: "Вопрос к читателям" },
+];
+
+function fakeAi({ text = "Готовый пост", facts = defaultFacts, angles = defaultAngles, unsupported = [], raw = {}, calls = [] } = {}) {
   const counts = {};
   return async (req) => {
     const step = stepOf(req);
@@ -36,6 +44,10 @@ function fakeAi({ text = "Готовый пост", facts = defaultFacts, unsupp
     if (step === "facts") {
       const list = typeof facts === "function" ? facts(req) : facts;
       return typeof list === "string" ? list : JSON.stringify({ facts: list });
+    }
+    if (step === "angles") {
+      const list = typeof angles === "function" ? angles(req) : angles;
+      return typeof list === "string" ? list : JSON.stringify({ focus: "Главное для читателя", angles: list });
     }
     if (step === "write") {
       const t = typeof text === "function" ? text(req, counts[step]) : text;
@@ -84,4 +96,4 @@ function postAi(fn, options = {}) {
   });
 }
 
-module.exports = { fakeAi, postAi, defaultFacts, anthropicFetch, stepOf, firstSha };
+module.exports = { fakeAi, postAi, defaultFacts, defaultAngles, anthropicFetch, stepOf, firstSha };
