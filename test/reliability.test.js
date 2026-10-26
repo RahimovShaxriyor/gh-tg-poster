@@ -437,10 +437,10 @@ describe("HTTP: Origin, выход, валидация", () => {
     assert.equal(ctx.post(sent).text, "Ушло");
 
     const missing = await post("/api/posts/999999/text", { text: "x" });
-    assert.equal(missing.status, 400);
+    assert.equal(missing.status, 404);
 
     const tooLong = await post(`/api/posts/${draft}/text`, { text: "x".repeat(10001) });
-    assert.equal(tooLong.status, 400);
+    assert.equal(tooLong.status, 422);
     assert.equal(ctx.post(draft).text, "Стало");
   });
 

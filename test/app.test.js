@@ -331,7 +331,8 @@ describe("gh-tg-web тесты", () => {
 
     const p = testCtx.post(postId);
     assert.equal(p.status, "failed");
-    assert.equal(p.error, "Telegram: Bad Request: chat not found");
+    // Ответ Telegram сохраняется дословно, перед ним — подсказка, что исправить
+    assert.match(p.error, /^Telegram не нашёл канал: .*\(Telegram: Bad Request: chat not found\)$/);
   });
 
   // 8. Двойную публикацию
@@ -457,9 +458,11 @@ describe("gh-tg-web тесты", () => {
       method: "POST",
       headers: { cookie },
     });
-    assert.equal(res.status, 400);
+    // Конфликт со статусом поста, а не ошибка в запросе
+    assert.equal(res.status, 409);
     const json = await res.json();
     assert.match(json.error, /Нельзя изменить уже отправленный пост/);
+    assert.equal(json.code, "POST_ALREADY_SENT");
   });
 
   // Дополнительный тест: GET /health
