@@ -7,6 +7,7 @@
   <title>Анонсы из коммитов</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/app.css">
+  <script src="/tg-format.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -410,6 +411,29 @@
           <form class="settings-section" id="sec-style" data-section="style" novalidate>
             <h2 class="section-title">Канал и стиль</h2>
             <p class="section-note">Для кого и как писать. ИИ получает это как описание канала, а утверждения в посте всё равно берёт только из фактов.</p>
+
+            <div class="field">
+              <label class="label" for="post_format">Формат публикации</label>
+              <select id="post_format" name="post_format" class="input input-mid">
+                <option value="short">Короткое обновление — 400–700 символов</option>
+                <option value="story">История обновления — 800–1400 символов</option>
+                <option value="release">Подробный релиз — 1400–2200 символов</option>
+              </select>
+              <p class="hint">Короткое — одно-два главных изменения. История — что изменилось, зачем и что это даёт. Подробный — изменения по группам с подзаголовками. Длина ориентировочная: если фактов мало, пост будет короче. Дату коммитов, ссылку на GitHub и хештеги бот добавляет сам в конце поста.</p>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label class="label" for="project_name">Название проекта</label>
+                <input type="text" id="project_name" name="project_name" class="input" maxlength="60" placeholder="По умолчанию — имя репозитория">
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="label" for="project_about">О проекте</label>
+              <textarea id="project_about" name="project_about" class="input textarea" rows="2" maxlength="300" placeholder="Одной-двумя фразами: что это за проект и для кого"></textarea>
+              <p class="hint">Необязательно. Без описания ИИ не объясняет, что это за проект, и не додумывает назначение по названию.</p>
+            </div>
 
             <div class="field">
               <label class="label" for="audience">Кто читает</label>

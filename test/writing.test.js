@@ -13,10 +13,10 @@ const variantsAnswer = (texts) => JSON.stringify({ variants: texts.map((text, i)
 const run = (opts) => pipeline.runPipeline({ data: DATA, profile: { audience: "users", emoji: "few" }, ...opts });
 
 describe("Написание по заходу: структура и варианты", () => {
-  it("в промпте — структура: заголовок до 90 символов, 2–4 абзаца, факт-деталь, призыв, лимит эмодзи", () => {
+  it("в промпте — структура: заголовок до 90 символов, абзацы, факт-деталь, призыв, лимит эмодзи", () => {
     const sys = pipeline.WRITE_SYSTEM({ count: 3 });
-    assert.match(sys, /Первая строка — заголовок-крючок до 90 символов: из hook захода\. Без звёздочек/);
-    assert.match(sys, /Затем 2–4 коротких абзаца/);
+    assert.match(sys, /Первая строка — заголовок-крючок до 90 символов: из hook захода.*Без звёздочек/);
+    assert.match(sys, /Абзацы по 1–3 предложения, между абзацами пустая строка/);
     assert.match(sys, /Один конкретный факт-деталь из <facts>/);
     assert.match(sys, /Последняя строка — как сказано в «Призыв в конце»/);
     assert.match(sys, /Эмодзи — не больше, чем разрешено/);

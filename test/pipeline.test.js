@@ -371,7 +371,10 @@ describe("generate(): конвейер в постах", () => {
     const id = Number(ctx.db.prepare("insert into posts(head,input,input_data,status) values('h','вход',?,'generating')").run(JSON.stringify(DATA)).lastInsertRowid);
     const r = await poster.generate(id, false, ctx, false, { locked: true, autoPublish: true, notify: false });
     assert.equal(r.status, "sent");
-    assert.deepEqual(sent, ["Появился экспорт"]);
+    // В канал — текст и подпись от кода; в базе — только текст
+    const footer = JSON.parse(ctx.post(id).meta).footer;
+    assert.deepEqual(sent, [footer ? "Появился экспорт\n\n" + footer : "Появился экспорт"]);
+    assert.equal(ctx.post(id).text, "Появился экспорт");
   });
 
   it("старый пост без input_data: вход берётся из текста, sha не проверяются", async () => {

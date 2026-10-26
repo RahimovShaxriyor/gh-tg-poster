@@ -56,8 +56,13 @@ describe("Регрессия режимов с конвейером", () => {
   it("auto: проверенный текст уходит в канал", async () => {
     const { ctx, channel } = makeCtx(fakeAi({ text: "Появился экспорт в Markdown" }), "auto");
     const res = await poster.check(true, ctx);
-    assert.equal(ctx.post(res.posts[0].id).status, "sent");
-    assert.deepEqual(channel.map((m) => m.text), ["Появился экспорт в Markdown"]);
+    const p = ctx.post(res.posts[0].id);
+    assert.equal(p.status, "sent");
+    // В канал — текст и подпись от кода (дата коммитов, ссылка, хештеги); в базе — только текст
+    const footer = JSON.parse(p.meta).footer;
+    assert.match(footer, /https:\/\/github\.com\/me\/repo\//);
+    assert.deepEqual(channel.map((m) => m.text), ["Появился экспорт в Markdown\n\n" + footer]);
+    assert.equal(p.text, "Появился экспорт в Markdown");
   });
 
   it("auto: пустой ответ на шаге написания — failed (не skipped), в канал ничего, владельцу сообщение", async () => {

@@ -130,8 +130,12 @@ describe("Регрессия: режимы и прежние посты с пр�
 
     const b = makeCtx("auto");
     const rb = await poster.check(true, b.ctx, { silent: true });
-    assert.equal(b.ctx.post(rb.posts[0].id).status, "sent");
-    assert.equal(b.channel[0].text, F.AFTER.users);
+    const pb = b.ctx.post(rb.posts[0].id);
+    assert.equal(pb.status, "sent");
+    // Текст с подписью от кода; жирный — только заголовок (подзаголовков в этом тексте нет, подпись не жирная)
+    const footer = JSON.parse(pb.meta).footer;
+    assert.match(footer, /GitHub: https:\/\/github\.com\/me\/pms\//);
+    assert.equal(b.channel[0].text, F.AFTER.users + "\n\n" + footer);
     assert.deepEqual(b.channel[0].entities, [{ type: "bold", offset: 0, length: F.AFTER.users.split("\n")[0].length }]);
 
     const d = makeCtx("digest");

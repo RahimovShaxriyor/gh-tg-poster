@@ -847,12 +847,12 @@
     const saveEl = h("span", { id: "editor-save" });
 
     const sync = () => {
-      const len = textarea.value.length;
+      const len = withFooter(p, textarea.value).length;
       counter.textContent = `${len} / 4096`;
       counter.classList.toggle("is-over", len > 4096);
       textarea.classList.toggle("is-over", len > 4096);
       const preview = $("#preview-text");
-      if (preview) fillPreviewText(preview, textarea.value, previewMarks(p), !!postMeta(p)?.headline);
+      if (preview) fillPreviewText(preview, withFooter(p, textarea.value), previewMarks(p), previewFormat(p));
     };
 
     textarea.addEventListener("input", () => {
@@ -936,18 +936,28 @@
   // Ссылки Telegram подсвечивает сам: повторяем это, ничего не превращая в HTML
   const linkify = (text) => text.split(/(https?:\/\/[^\s<>"«»]+)/g).map((part, i) => (i % 2 ? h("span", { class: "tg-link" }, part) : part));
 
-  function fillPreviewText(el, text, marks = [], bold = false) {
+  function fillPreviewText(el, text, marks = [], format = {}) {
     el.classList.toggle("is-empty", !text.trim());
     if (!text.trim()) {
       el.textContent = "Пустое сообщение";
       return;
     }
-    // Заголовок от конвейера бот публикует жирным: так же и в предпросмотре
-    const nl = text.indexOf("\n");
-    if (!bold || nl === 0) return el.replaceChildren(...decorate(text, marks));
-    const head = nl === -1 ? text : text.slice(0, nl);
-    el.replaceChildren(h("strong", {}, ...decorate(head, marks)), ...(nl === -1 ? [] : decorate(text.slice(nl), marks)));
+    // Жирное — по тому же правилу, по которому бот размечает пост в канале (tg-format.js)
+    const bold = window.TgFormat ? window.TgFormat.boldRanges(text, format) : [];
+    const out = [];
+    let at = 0;
+    for (const r of bold) {
+      if (r.offset > at) out.push(...decorate(text.slice(at, r.offset), marks));
+      out.push(h("strong", {}, ...decorate(text.slice(r.offset, r.offset + r.length), marks)));
+      at = r.offset + r.length;
+    }
+    if (at < text.length) out.push(...decorate(text.slice(at), marks));
+    el.replaceChildren(...out);
   }
+
+  const previewFormat = (p) => ({ headline: !!postMeta(p)?.headline, sections: !!postMeta(p)?.sections });
+  // В канал уходит текст с подписью от бота (дата коммитов, ссылка, хештеги): так же в предпросмотре и счётчике
+  const withFooter = (p, text) => (postMeta(p)?.footer ? `${String(text || "").trimEnd()}\n\n${postMeta(p).footer}` : String(text || ""));
 
   /**
    * Текст с отметками: [{ quote, cls, title, all }]. Фраза ищется без учёта регистра; all — все вхождения,
@@ -1007,7 +1017,7 @@
     const name = channel.startsWith("@") ? channel.slice(1) : "Ваш канал";
     const sentAt = parseDate(p.sent_at);
     const textEl = h("div", { class: "tg-text", id: p.status === "draft" ? "preview-text" : null });
-    fillPreviewText(textEl, getText(), previewMarks(p), !!postMeta(p)?.headline);
+    fillPreviewText(textEl, withFooter(p, getText()), previewMarks(p), previewFormat(p));
     return h("section", { class: "block", "aria-label": "Предпросмотр" },
       h("h2", { class: "block-title" }, p.status === "sent" ? "Так выглядит в канале" : "Так увидят подписчики",
         p.status === "sent" && sentAt ? h("time", { class: "detail-meta", datetime: sentAt.toISOString() }, `отправлен ${fullDate(p.sent_at)}`) : null),
@@ -1036,15 +1046,18 @@
     const profile = tokensOf((s.voice || "").length + (s.tone || "").length + (s.banned_words || "").length) + 120;
     const samples = tokensOf((s.style_samples || "").length);
     const memory = 1200; // журнал объявленного и последние посты, в среднем
+    // Ответ шага написания: JSON с текстом и разметкой предложений, по формату публикации
+    const post = { short: 380, story: 650, release: 1000 }[s.post_format] || 650;
+    const project = 250; // блок <project>: название, период, список коммитов
     const calls = [];
     if (kind === "full") {
       calls.push([900 + tokensOf(String(p.input || "").length + String(p.notes || "").length), facts]);
-      calls.push([700 + facts + profile, 350]);
-      calls.push([1400 + facts + profile + samples + memory, 380 * variants]);
+      calls.push([700 + facts + profile + project, 350]);
+      calls.push([1700 + facts + profile + samples + memory + project, post * variants]);
     } else {
-      calls.push([1400 + facts + profile + samples + memory + 300, 380]);
+      calls.push([1700 + facts + profile + samples + memory + project + 300, post]);
     }
-    if (strict) calls.push([600 + facts + 300, 150]);
+    if (strict) calls.push([650 + facts + project + post / 2, 150]);
     const input = calls.reduce((n, c) => n + c[0], 0);
     const output = calls.reduce((n, c) => n + c[1], 0);
     const price = PRICES.find(([re]) => re.test(s.ai_model || ""));
@@ -1301,7 +1314,8 @@
   async function doPublish(p, btn) {
     const text = ($("#editor")?.value ?? currentText(p)).trim();
     if (!text) return toast("Текст пустой: напишите пост или попросите другой вариант.", "error");
-    if (text.length > 4096) return toast(`Текст длиннее 4096 символов на ${text.length - 4096}. Сократите его.`, "error");
+    const full = withFooter(p, text).length;
+    if (full > 4096) return toast(`Текст с подписью длиннее 4096 символов на ${full - 4096}. Сократите его.`, "error");
     const confirmUnverified = await confirmReview(p);
     if (confirmUnverified === null) return;
     clearTimeout(S.saveTimers[p.id]);
@@ -1496,6 +1510,9 @@
       $("#banned_words").value = s.banned_words || "";
       $("#emoji").value = s.emoji || "few";
       $("#cta").value = s.cta || "none";
+      $("#post_format").value = ["short", "story", "release"].includes(s.post_format) ? s.post_format : "story";
+      $("#project_name").value = s.project_name || "";
+      $("#project_about").value = s.project_about || "";
       let samples = [];
       try {
         samples = JSON.parse(s.style_samples || "[]");
@@ -1830,7 +1847,7 @@
       }
     }
     if (section === "style") {
-      for (const k of ["audience", "voice", "tone", "banned_words", "emoji", "cta"]) payload[k] = v(k);
+      for (const k of ["audience", "voice", "tone", "banned_words", "emoji", "cta", "post_format", "project_name", "project_about"]) payload[k] = v(k);
       const samples = $$(".style-sample").map((el) => el.value.trim()).filter(Boolean);
       payload.style_samples = samples.length ? JSON.stringify(samples) : "";
     }
