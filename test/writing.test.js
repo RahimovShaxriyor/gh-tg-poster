@@ -4,6 +4,7 @@ const { createDatabase } = require("../lib/db");
 const poster = require("../lib/poster");
 const pipeline = require("../lib/pipeline");
 const { fakeAi } = require("./helpers/fake-ai");
+const { tenantDb, channelAdmin } = require("./helpers/tenant");
 
 const SHA = "a".repeat(40);
 const DATA = { commits: [{ sha: SHA, message: "feat: экспорт в Markdown" }], files: [{ filename: "src/export.js", additions: 1, deletions: 0, patch: "+export" }] };
@@ -85,11 +86,12 @@ describe("Публикация: заголовок жирным", () => {
     const w = console.warn;
     console.warn = () => {};
     const sent = [];
-    const ctx = { ...createDatabase(":memory:", "writing-key"), TG_BOT_TOKEN: "1:a", tg: async (m, body) => (sent.push(body), { ok: true, result: { message_id: 1 } }) };
+    const ctx = { ...tenantDb(":memory:", "writing-key"), TG_BOT_TOKEN: "1:a", tg: channelAdmin(async (m, body) => (sent.push(body), { ok: true, result: { message_id: 1 } })) };
     console.warn = w;
     ctx.set("channel_id", "@chan");
-    const withHead = Number(ctx.db.prepare("insert into posts(head,input,text,status,meta) values('h','i',?, 'draft', ?)").run("Экспорт в Markdown 📝\nТекст", JSON.stringify({ headline: true })).lastInsertRowid);
-    const old = Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','i','Старый пост','draft')").run().lastInsertRowid);
+    ctx.set("tg_owner_chat_id", "42");
+    const withHead = Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status,meta) values(1,'h','i',?, 'draft', ?)").run("Экспорт в Markdown 📝\nТекст", JSON.stringify({ headline: true })).lastInsertRowid);
+    const old = Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status) values(1,'h','i','Старый пост','draft')").run().lastInsertRowid);
     await poster.publish(withHead, null, ctx);
     await poster.publish(old, null, ctx);
     // Длина — в единицах UTF-16, как считает Telegram (эмодзи — 2)
@@ -102,11 +104,11 @@ describe("Публикация: заголовок жирным", () => {
     const w = console.warn;
     console.warn = () => {};
     const calls = [];
-    const ctx = { ...createDatabase(":memory:", "writing-key2"), aiCall: fakeAi({ facts: [FACT], calls }) };
+    const ctx = { ...tenantDb(":memory:", "writing-key2"), aiCall: fakeAi({ facts: [FACT], calls }) };
     console.warn = w;
     ctx.set("ai_key", "k");
     ctx.set("ai_model", "m");
-    const add = () => Number(ctx.db.prepare("insert into posts(head,input,input_data,status) values('h','i',?,'draft')").run(JSON.stringify(DATA)).lastInsertRowid);
+    const add = () => Number(ctx.db.prepare("insert into posts(user_id,head,input,input_data,status) values(1,'h','i',?,'draft')").run(JSON.stringify(DATA)).lastInsertRowid);
     await poster.generate(add(), true, ctx);
     assert.match(calls.find((c) => c.step === "write").system, /Напиши 3 варианта/);
     calls.length = 0;

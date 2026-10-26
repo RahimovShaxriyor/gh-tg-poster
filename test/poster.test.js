@@ -5,6 +5,7 @@ const http = require("node:http");
 const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const { ai, TIMEOUTS } = require("../lib/services");
+const { TEST_PASSWORD, tenantDb } = require("./helpers/tenant");
 
 describe("Перегенерация, таймауты, зависшие посты", () => {
   const TEST_PASS = "poster-test-pass";
@@ -25,7 +26,7 @@ describe("Перегенерация, таймауты, зависшие пос�
     };
 
     ctx = {
-      ...createDatabase(":memory:", "poster-test-key"),
+      ...tenantDb(":memory:", "poster-test-key"),
       ADMIN_PASSWORD: TEST_PASS,
       SESSION_SECRET: TEST_PASS,
       tg: async (method, body) => {
@@ -49,10 +50,10 @@ describe("Перегенерация, таймауты, зависшие пос�
   });
 
   async function cookie() {
-    const res = await fetch(`${baseUrl}/login`, {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: TEST_PASS }),
+      body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }),
     });
     return res.headers.get("set-cookie").split(";")[0];
   }
@@ -62,10 +63,10 @@ describe("Перегенерация, таймауты, зависшие пос�
       sentMessages = [];
       ctx.set("mode", "auto");
       ctx.set("channel_id", "@chan");
-      ctx.set("tg_token", "123:abc");
+      ctx.TG_BOT_TOKEN = "123:abc";
       ctx.set("ai_key", "k");
       ctx.set("ai_model", "m");
-      const id = ctx.db.prepare("insert into posts(status, input, text) values(?, 'Коммиты: x', 'старый')").run(status).lastInsertRowid;
+      const id = ctx.db.prepare("insert into posts(user_id,status, input, text) values(1,?, 'Коммиты: x', 'старый')").run(status).lastInsertRowid;
 
       const res = await fetch(`${baseUrl}/api/posts/${id}/regen`, { method: "POST", headers: { cookie: await cookie() } });
       assert.equal(res.status, 200);
@@ -76,9 +77,9 @@ describe("Перегенерация, таймауты, зависшие пос�
   }
 
   it("посты, зависшие в sending, при старте переводятся в failed с понятной ошибкой", () => {
-    const db = createDatabase(":memory:", "k");
-    const id = db.db.prepare("insert into posts(status, text) values('sending', 't')").run().lastInsertRowid;
-    assert.equal(db.recoverStuckSending(), 1);
+    const db = tenantDb(":memory:", "k");
+    const id = db.db.prepare("insert into posts(user_id,status, text) values(1,'sending', 't')").run().lastInsertRowid;
+    assert.equal(db.platform.recoverStuckSending(), 1);
     assert.equal(db.post(id).status, "failed");
     assert.match(db.post(id).error, /прервана перезапуском/);
   });

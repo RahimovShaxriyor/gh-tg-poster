@@ -380,14 +380,6 @@ kbd {
   color: var(--warn);
 }
 
-.tg-legacy {
-  margin-top: var(--s3);
-}
-
-.tg-legacy p + p {
-  color: var(--text-2);
-}
-
 /* ===== Поповер подключения ===== */
 .popover {
   position: fixed;
@@ -1756,6 +1748,27 @@ kbd {
 .login-box .btn-block {
   min-height: 40px;
   margin-top: var(--s4);
+}
+
+.login-label {
+  margin-top: var(--s3);
+}
+
+.login-switch {
+  margin: var(--s4) 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.topbar-user {
+  align-self: center;
+  max-width: 16ch;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ===== Диалог и уведомления ===== */

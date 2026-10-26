@@ -11,7 +11,8 @@ const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const poster = require("../lib/poster");
 const services = require("../lib/services");
-const { cleanError } = require("../lib/crypto");
+const { cleanError, verifyPasswordHash } = require("../lib/crypto");
+const { TEST_PASSWORD, tenantDb, channelAdmin } = require("./helpers/tenant");
 
 const quiet = () => {
   const { log, warn } = console;
@@ -34,12 +35,13 @@ const commit = (sha, msg = "feat: " + sha, parents = 1) => ({
  */
 function makeCtx({ ai, tg, commits = () => [], compare } = {}) {
   const restore = quiet();
-  const db = createDatabase(":memory:", "reliability-key");
+  const db = tenantDb(":memory:", "reliability-key");
   restore();
   const sent = [];
   const owner = [];
   const ctx = {
     ...db,
+    TG_BOT_TOKEN: "1:a",
     tg: tg || (async (method, body) => {
       if (method === "sendMessage" && body.chat_id === "@chan") sent.push(body.text);
       if (method === "sendMessage" && body.chat_id === "42") owner.push(body.text);
@@ -54,14 +56,15 @@ function makeCtx({ ai, tg, commits = () => [], compare } = {}) {
     buildInput: async (repo, base, head, msgs) => "Коммиты:\n" + msgs.join("\n"),
   };
   for (const [k, v] of Object.entries({
-    repo: "me/repo", github_token: "t", channel_id: "@chan", tg_token: "1:a",
+    repo: "me/repo", github_token: "t", channel_id: "@chan",
     ai_key: "k", ai_model: "m", debounce: "0", tg_owner_chat_id: "42",
   })) ctx.set(k, v);
+  ctx.tg = channelAdmin(ctx.tg);
   return { ctx, sent, owner };
 }
 
 const addPost = (ctx, status = "draft", text = "Текст") =>
-  Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','вход',?,?)").run(text, status).lastInsertRowid);
+  Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status) values(1,'h','вход',?,?)").run(text, status).lastInsertRowid);
 
 describe("Надёжность: гонки статусов, SKIP, force-push, сбои", () => {
   it("новый вариант, готовый после публикации, не возвращает пост в черновики и не даёт отправить дубль", async () => {
@@ -74,7 +77,8 @@ describe("Надёжность: гонки статусов, SKIP, force-push, �
     const regen = poster.generate(id, true, ctx);
     await assert.rejects(() => poster.publish(id, "Старый", ctx), /уже отправляется или уже был отправлен/);
     assert.equal(ctx.post(id).status, "generating");
-    await assert.rejects(() => poster.generate(id, true, ctx), /уже готовится/);
+    // Вторая генерация отклоняется: либо лимитом «одна генерация на аккаунт», либо блокировкой поста
+    await assert.rejects(() => poster.generate(id, true, ctx), /уже готовится|уже пишутся посты/);
 
     release();
     assert.deepEqual(await regen, { status: "draft" });
@@ -180,12 +184,12 @@ describe("Надёжность: гонки статусов, SKIP, force-push, �
     const file = path.join(dir, "app.db");
     const restore = quiet();
     try {
-      const a = createDatabase(file, "k");
-      a.db.prepare("insert into posts(head,input,status) values('h','i','generating')").run();
-      a.db.prepare("insert into posts(head,input,status,text) values('h','i','draft',null)").run();
-      a.db.prepare("insert into posts(head,input,status,text) values('h','i','draft','Нормальный')").run();
+      const a = tenantDb(file, "k");
+      a.db.prepare("insert into posts(user_id,head,input,status) values(1,'h','i','generating')").run();
+      a.db.prepare("insert into posts(user_id,head,input,status,text) values(1,'h','i','draft',null)").run();
+      a.db.prepare("insert into posts(user_id,head,input,status,text) values(1,'h','i','draft','Нормальный')").run();
       a.db.close();
-      const b = createDatabase(file, "k");
+      const b = tenantDb(file, "k");
       const statuses = b.db.prepare("select status from posts order by id").all().map((r) => r.status);
       assert.deepEqual(statuses, ["failed", "failed", "draft"]);
       assert.match(b.post(1).error, /Генерация прервана/);
@@ -202,7 +206,7 @@ describe("Надёжность: гонки статусов, SKIP, force-push, �
     const restore = quiet();
     try {
       const file = path.join(dir, "sub", "app.db");
-      const b = createDatabase(file, "k");
+      const b = tenantDb(file, "k");
       b.set("repo", "a/b");
       assert.equal(fs.statSync(file).mode & 0o777, 0o600);
       assert.equal(fs.statSync(path.dirname(file)).mode & 0o077, 0);
@@ -301,7 +305,7 @@ describe("Надёжность: гонки статусов, SKIP, force-push, �
     const now = new Date();
     const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
     const tzoAt = (localMinutes) => -(localMinutes - utcMinutes); // как Date#getTimezoneOffset
-    ctx.db.prepare("insert into posts(head,input,text,status,sent_at) values('h','i','т','sent',?)")
+    ctx.db.prepare("insert into posts(user_id,head,input,text,status,sent_at) values(1,'h','i','т','sent',?)")
       .run(new Date(now.getTime() - 2 * 3600e3).toISOString());
     assert.equal(ctx.getCounts(tzoAt(60)).sent_today, 0);
     assert.equal(ctx.getCounts(tzoAt(12 * 60)).sent_today, 1);
@@ -388,15 +392,15 @@ describe("HTTP: Origin, выход, валидация", () => {
 
   before(async () => {
     const restore = quiet();
-    ctx = { ...createDatabase(":memory:", "k"), ADMIN_PASSWORD: PASS, SESSION_SECRET: "s".repeat(40) };
+    ctx = { ...tenantDb(":memory:", "k"), ADMIN_PASSWORD: PASS, SESSION_SECRET: "s".repeat(40) };
     restore();
     server = http.createServer(createApp(ctx));
     await new Promise((r) => server.listen(0, r));
     base = `http://127.0.0.1:${server.address().port}`;
-    const res = await fetch(`${base}/login`, {
+    const res = await fetch(`${base}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: PASS }),
+      body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }),
     });
     cookie = res.headers.get("set-cookie").split(";")[0];
   });
@@ -425,8 +429,8 @@ describe("HTTP: Origin, выход, валидация", () => {
   });
 
   it("правка черновика сохраняется только в черновик", async () => {
-    const draft = Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','i','Было','draft')").run().lastInsertRowid);
-    const sent = Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','i','Ушло','sent')").run().lastInsertRowid);
+    const draft = Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status) values(1,'h','i','Было','draft')").run().lastInsertRowid);
+    const sent = Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status) values(1,'h','i','Ушло','sent')").run().lastInsertRowid);
 
     const ok = await post(`/api/posts/${draft}/text`, { text: "Стало" });
     assert.equal(ok.status, 200);
@@ -479,19 +483,29 @@ describe("Скрипты обслуживания", () => {
     if (process.platform !== "win32") assert.equal(fs.statSync(target).mode & 0o777, 0o600);
   });
 
-  it("reset-password.js удаляет пароль из панели и завершает сессии", () => {
+  it("reset-password.js: новый пароль аккаунту, его сессии завершены, чужие не тронуты", async () => {
     const src = path.join(dir, "app.db");
-    const db = new Database(src);
-    db.exec("create table kv(k text primary key, v text)");
-    db.prepare("insert into kv values('admin_password_hash','scrypt$x'),('session_version','4')").run();
-    db.close();
-    execFileSync(process.execPath, [path.join(root, "scripts", "reset-password.js")], {
-      env: { ...process.env, DB_PATH: src },
+    const restore = quiet();
+    const alice = tenantDb(src, "k", { username: "alice", password: "alice-old-password" });
+    const bob = tenantDb(src, "k", { username: "bob", password: "bob-password-123" });
+    restore();
+    const a = alice.platform.createSession(alice.userId, 60000);
+    const b = bob.platform.createSession(bob.userId, 60000);
+    const bobHash = bob.platform.passwordHashOf(bob.userId);
+    alice.db.close();
+    bob.db.close();
+
+    const out = execFileSync(process.execPath, [path.join(root, "scripts", "reset-password.js"), "--username", "alice"], {
+      env: { ...process.env, DB_PATH: src, NEW_PASSWORD: "fresh-secret-pass-71" },
       encoding: "utf8",
     });
-    const check = new Database(src, { readonly: true });
-    assert.equal(check.prepare("select v from kv where k='admin_password_hash'").get(), undefined);
-    assert.equal(check.prepare("select v from kv where k='session_version'").get().v, "5");
-    check.close();
+    assert.match(out, /Пароль аккаунта alice изменён, завершено сессий: 1/);
+    const check = tenantDb(src, "k", { username: "bob" });
+    const p = check.platform;
+    assert.equal((await verifyPasswordHash("fresh-secret-pass-71", p.passwordHashOf(p.userByUsername("alice").id))).ok, true);
+    assert.equal(p.sessionByToken(a.token), null, "сессия alice завершена");
+    assert.ok(p.sessionByToken(b.token), "сессия bob работает");
+    assert.equal(p.passwordHashOf(check.userId), bobHash, "пароль bob не изменился");
+    check.db.close();
   });
 });

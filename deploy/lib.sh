@@ -82,3 +82,30 @@ confirm() {
   read -r answer || answer=""
   [ "$answer" = yes ] || die "Отменено."
 }
+
+# ===== Версия схемы базы и совместимость кода =====
+# Версия схемы из заголовка файла SQLite (PRAGMA user_version, байты 60–63). Нет файла — 0.
+# Читается без sqlite3 и node: откат работает, даже если приложение не запускается.
+db_schema_version() {
+  [ -f "$1" ] || {
+    echo 0
+    return 0
+  }
+  od -An -tu1 -j60 -N4 "$1" | awk 'NF { print $1 * 16777216 + $2 * 65536 + $3 * 256 + $4; exit }'
+}
+
+# Какую схему понимает код коммита: SCHEMA_VERSION из его lib/db.js. В однопользовательских версиях её нет — 1
+code_schema_version() {
+  v="$(git -C "$APP_DIR" show "$1:lib/db.js" 2>/dev/null | sed -n 's/^const SCHEMA_VERSION = \([0-9][0-9]*\);.*/\1/p' | head -n 1)"
+  echo "${v:-1}"
+}
+
+# Самая свежая копия из backups/predeploy, которую понимает код со схемой $1. Нет такой — пусто
+compatible_predeploy_copy() {
+  ls -1t "$APP_DIR"/backups/predeploy/app_*.db 2>/dev/null | while IFS= read -r f; do
+    if [ "$(db_schema_version "$f")" -le "$1" ]; then
+      printf '%s\n' "$f"
+      break
+    fi
+  done
+}

@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { createDatabase } = require("../lib/db");
 const poster = require("../lib/poster");
 const { fakeAi } = require("./helpers/fake-ai");
+const { tenantDb, channelAdmin } = require("./helpers/tenant");
 
 // Регрессия: режимы работают как до конвейера, но текст пишется в три шага
 const BASE = "0".repeat(40);
@@ -15,7 +16,7 @@ const LIST = [
 function makeCtx(aiCall, mode) {
   const w = console.warn;
   console.warn = () => {};
-  const db = createDatabase(":memory:", "regress-key");
+  const db = tenantDb(":memory:", "regress-key");
   console.warn = w;
   const channel = [];
   const owner = [];
@@ -35,6 +36,7 @@ function makeCtx(aiCall, mode) {
     debounce: "0", mode, last_sha: BASE, tg_owner_chat_id: "42", tg_notify_drafts: "1",
     last_digest_date: "2000-01-01", digest_time: "00:00",
   })) ctx.set(k, v);
+  ctx.tg = channelAdmin(ctx.tg);
   return { ctx, channel, owner };
 }
 

@@ -76,6 +76,20 @@ main() {
   rollback() {
     warn "$1 Откатываюсь на $(printf '%s' "$PREV_SHA" | cut -c1-7)."
     git reset --hard --quiet "$PREV_SHA"
+    # Новая версия могла успеть перевести базу в новую схему. Прежний код её не понимает (однопользовательская
+    # версия показала бы данные всех аккаунтов), поэтому возвращаем копию, сделанную перед этим обновлением
+    TARGET_SCHEMA="$(code_schema_version "$PREV_SHA")"
+    if [ "$(db_schema_version "$APP_DIR/data/app.db")" -gt "$TARGET_SCHEMA" ]; then
+      COPY="$(compatible_predeploy_copy "$TARGET_SCHEMA")"
+      compose stop app >/dev/null 2>&1 || true
+      [ -n "$COPY" ] || die "База уже в новой схеме, а копии для прежней версии нет. Прежняя версия НЕ запущена, чтобы не раскрыть данные аккаунтов. Разберитесь вручную: docker compose logs app"
+      FAILED="$APP_DIR/data/app.db.failed-upgrade-$(date -u +%Y%m%d%H%M%S)"
+      mv "$APP_DIR/data/app.db" "$FAILED"
+      for ext in -wal -shm; do [ -f "$APP_DIR/data/app.db$ext" ] && mv "$APP_DIR/data/app.db$ext" "$FAILED$ext"; done
+      cp "$COPY" "$APP_DIR/data/app.db"
+      chmod 600 "$APP_DIR/data/app.db"
+      warn "База возвращена из $(basename "$COPY"); база после неудачного обновления сохранена как $(basename "$FAILED")."
+    fi
     if [ "$HAD_IMAGE" = 1 ]; then
       docker tag gh-tg-web:previous gh-tg-web:current
       restore_rollback_point

@@ -5,6 +5,7 @@ const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const poster = require("../lib/poster");
 const { fakeAi } = require("./helpers/fake-ai");
+const { TEST_PASSWORD, tenantDb } = require("./helpers/tenant");
 
 const SHA = "a".repeat(40);
 const DATA = { commits: [{ sha: SHA, message: "feat: экспорт в Markdown" }], files: [{ filename: "src/export.js", additions: 1, deletions: 0, patch: "+export" }] };
@@ -20,11 +21,11 @@ function setup(options = {}, settings = {}) {
   const w = console.warn;
   console.warn = () => {};
   const calls = [];
-  const ctx = { ...createDatabase(":memory:", "variants-key"), ADMIN_PASSWORD: "variants-pass", SESSION_SECRET: "s".repeat(40) };
+  const ctx = { ...tenantDb(":memory:", "variants-key"), ADMIN_PASSWORD: "variants-pass", SESSION_SECRET: "s".repeat(40) };
   console.warn = w;
   ctx.aiCall = fakeAi({ facts: [FACT], calls, raw: { write: (req, n) => (n === 1 && !settings.variants ? variantsAnswer : JSON.stringify({ text: options.rewrite || "Новая версия\n\nВ меню заметки есть «Экспорт».", used_facts: ["f1"] })) }, ...options });
   for (const [k, v] of Object.entries({ ai_key: "k", ai_model: "m", ...settings })) ctx.set(k, v);
-  const id = Number(ctx.db.prepare("insert into posts(head,input,input_data,status) values('h','i',?,'draft')").run(JSON.stringify(DATA)).lastInsertRowid);
+  const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,input_data,status) values(1,'h','i',?,'draft')").run(JSON.stringify(DATA)).lastInsertRowid);
   return { ctx, calls, id };
 }
 
@@ -153,7 +154,7 @@ describe("Варианты подачи: выбор и быстрые кнопк
       server = http.createServer(createApp(env.ctx));
       await new Promise((r) => server.listen(0, r));
       base = `http://127.0.0.1:${server.address().port}`;
-      const login = await fetch(`${base}/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: "variants-pass" }) });
+      const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }) });
       cookie = login.headers.get("set-cookie").split(";")[0];
     });
     after(() => new Promise((r) => server.close(r)));

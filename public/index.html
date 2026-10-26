@@ -28,15 +28,19 @@
     <symbol id="i-inbox" viewBox="0 0 16 16"><path d="M1.5 9h4l1 2h3l1-2h4M3.5 3h9l2 6v4.5h-13V9z"/></symbol>
   </svg>
 
-  <!-- Вход. Показывается поверх панели: при истёкшей сессии введённый текст остаётся на месте -->
+  <!-- Вход и регистрация. Показываются поверх панели: при истёкшей сессии введённый текст остаётся на месте -->
   <div id="login" class="login" hidden>
     <form id="login-form" class="login-box" novalidate>
-      <h1 class="login-title">Анонсы из коммитов</h1>
-      <p class="login-note" id="login-note">Введите пароль администратора.</p>
-      <label class="label" for="pw">Пароль</label>
-      <input type="password" id="pw" class="input" autocomplete="current-password" required>
+      <h1 class="login-title" id="login-title">Вход</h1>
+      <p class="login-note" id="login-note">Анонсы из коммитов GitHub в ваш Telegram-канал.</p>
+      <label class="label" for="login-username">Имя пользователя</label>
+      <input type="text" id="login-username" class="input" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required>
+      <label class="label login-label" for="pw">Пароль</label>
+      <input type="password" id="pw" class="input" autocomplete="current-password" maxlength="128" required>
+      <p class="hint" id="login-hint" hidden>Не короче 10 символов. Почта не нужна, но и восстановить пароль по почте нельзя: если забудете его, доступ вернёт только администратор сервера.</p>
       <p class="form-error" id="login-error" role="alert" hidden></p>
       <button type="submit" class="btn btn-primary btn-block" id="login-submit">Войти</button>
+      <p class="login-switch"><span id="login-switch-text">Нет аккаунта?</span> <a href="#" id="login-switch">Зарегистрироваться</a></p>
     </form>
   </div>
 
@@ -68,6 +72,7 @@
         <button type="button" class="btn btn-ghost" id="btn-check" title="Проверить новые коммиты сейчас">
           <svg class="i"><use href="#i-refresh"/></svg><span class="hide-narrow">Проверить</span>
         </button>
+        <span class="topbar-user hide-narrow" id="topbar-user"></span>
         <button type="button" class="btn btn-ghost btn-icon hide-narrow" id="btn-logout" title="Выйти" aria-label="Выйти">
           <svg class="i"><use href="#i-logout"/></svg>
         </button>
@@ -90,7 +95,7 @@
         <div class="list-pane">
           <div class="banner" data-tg-banner role="status" hidden>
             <svg class="i" aria-hidden="true"><use href="#i-alert"/></svg>
-            <span>Бот не настроен: задайте TG_BOT_TOKEN в .env и перезапустите сервер.</span>
+            <span>Бот платформы не настроен: публикация в Telegram недоступна, пока администратор сервера не задаст токен бота.</span>
           </div>
           <div class="list-head">
             <p class="status-line" id="status-line"><span class="skeleton skeleton-text"></span></p>
@@ -180,7 +185,7 @@
         <div class="settings-body">
           <div class="banner" data-tg-banner role="status" hidden>
             <svg class="i" aria-hidden="true"><use href="#i-alert"/></svg>
-            <span>Бот не настроен: задайте TG_BOT_TOKEN в .env и перезапустите сервер.</span>
+            <span>Бот платформы не настроен: публикация в Telegram недоступна, пока администратор сервера не задаст токен бота.</span>
           </div>
           <!-- GitHub -->
           <form class="settings-section" id="sec-github" data-section="github" novalidate>
@@ -244,20 +249,12 @@
               <span class="label">Бот</span>
               <p class="field-value" id="tg-bot-status"></p>
               <p class="hint" id="tg-bot-hint"></p>
-              <div class="notice is-warn tg-legacy" id="tg-legacy" hidden>
-                <svg class="i" aria-hidden="true"><use href="#i-alert"/></svg>
-                <div>
-                  <p>Токен бота перенесён в .env: добавьте TG_BOT_TOKEN и удалите старое значение.</p>
-                  <p id="tg-legacy-text"></p>
-                  <p><button type="button" class="btn btn-secondary btn-sm" id="btn-tg-legacy-delete">Удалить старый токен</button></p>
-                </div>
-              </div>
             </div>
 
             <div class="field">
               <label class="label" for="channel_id">Канал</label>
               <input type="text" id="channel_id" name="channel_id" class="input" autocomplete="off" spellcheck="false" placeholder="@my_channel или -1001234567890">
-              <p class="hint">Определяется сам, когда вы (привязанный владелец) делаете бота администратором канала. Можно вписать вручную: @канал или числовой ID.</p>
+              <p class="hint">Определяется сам, когда вы со своего привязанного Telegram делаете бота администратором канала. Можно вписать вручную: @канал или числовой ID — канал подключится, только если ваш привязанный Telegram — его администратор с правом публикации.</p>
             </div>
 
             <div class="field">
@@ -422,11 +419,9 @@
               <p class="hint">Короткое — одно-два главных изменения. История — что изменилось, зачем и что это даёт. Подробный — изменения по группам с подзаголовками. Длина ориентировочная: если фактов мало, пост будет короче. Дату коммитов, ссылку на GitHub и хештеги бот добавляет сам в конце поста.</p>
             </div>
 
-            <div class="field-row">
-              <div class="field">
-                <label class="label" for="project_name">Название проекта</label>
-                <input type="text" id="project_name" name="project_name" class="input" maxlength="60" placeholder="По умолчанию — имя репозитория">
-              </div>
+            <div class="field">
+              <label class="label" for="project_name">Название проекта</label>
+              <input type="text" id="project_name" name="project_name" class="input input-mid" maxlength="60" placeholder="По умолчанию — имя репозитория">
             </div>
 
             <div class="field">
@@ -549,16 +544,16 @@
             </div>
             <div class="field">
               <label class="label" for="new_password">Новый пароль</label>
-              <input type="password" id="new_password" class="input input-mid" autocomplete="new-password" minlength="6">
+              <input type="password" id="new_password" class="input input-mid" autocomplete="new-password" minlength="10" maxlength="128">
             </div>
             <div class="field">
               <label class="label" for="confirm_password">Новый пароль ещё раз</label>
               <input type="password" id="confirm_password" class="input input-mid" autocomplete="new-password">
-              <p class="hint">После смены пароля все остальные сессии завершатся. Пароль из .env перестанет действовать; вернуть его можно командой из README.</p>
+              <p class="hint">Не короче 10 символов. После смены пароля все остальные сессии этого аккаунта завершатся. Почты у аккаунта нет: забытый пароль сбрасывает только администратор сервера.</p>
             </div>
             <div class="section-actions">
               <button type="submit" class="btn btn-primary">Сменить пароль</button>
-              <button type="button" class="btn btn-secondary" id="btn-logout-2">Выйти из панели</button>
+              <button type="button" class="btn btn-secondary" id="btn-logout-2">Выйти из аккаунта</button>
             </div>
           </form>
         </div>

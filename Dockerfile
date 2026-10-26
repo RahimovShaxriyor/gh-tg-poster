@@ -11,7 +11,7 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 COPY lib ./lib
 COPY public ./public
-COPY scripts/backup-db.js scripts/check-db.js scripts/reset-password.js ./scripts/
+COPY scripts/backup-db.js scripts/check-db.js scripts/reset-password.js scripts/claim-legacy.js scripts/rehearse-upgrade.js ./scripts/
 COPY server.js .env.example ./
 
 # Версия для /health в боте: deploy.sh передаёт короткий sha коммита

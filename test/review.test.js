@@ -5,6 +5,7 @@ const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const { handleUpdate } = require("../lib/telegram-bot");
 const { draftMessage, textHash } = require("../lib/notify");
+const { TEST_PASSWORD, tenantDb, channelAdmin } = require("./helpers/tenant");
 
 const META = JSON.stringify({
   facts: [], used_facts: [],
@@ -14,7 +15,7 @@ const META = JSON.stringify({
 function makeCtx() {
   const w = console.warn;
   console.warn = () => {};
-  const db = createDatabase(":memory:", "review-key");
+  const db = tenantDb(":memory:", "review-key");
   console.warn = w;
   const calls = [];
   const ctx = {
@@ -29,11 +30,12 @@ function makeCtx() {
   };
   ctx.set("channel_id", "@chan");
   ctx.set("tg_owner_chat_id", "42");
+  ctx.tg = channelAdmin(ctx.tg);
   return { ctx, calls };
 }
 
 const addPost = (ctx, needsReview) =>
-  Number(ctx.db.prepare("insert into posts(head,input,text,status,meta,needs_review) values('h','i','Стало в 2 раза быстрее','draft',?,?)")
+  Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status,meta,needs_review) values(1,'h','i','Стало в 2 раза быстрее','draft',?,?)")
     .run(needsReview ? META : null, needsReview ? 1 : 0).lastInsertRowid);
 
 describe("Публикация текста с непроверенными утверждениями", () => {
@@ -48,7 +50,7 @@ describe("Публикация текста с непроверенными ут
     server = http.createServer(createApp(ctx));
     await new Promise((r) => server.listen(0, r));
     base = `http://127.0.0.1:${server.address().port}`;
-    const login = await fetch(`${base}/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: "review-pass" }) });
+    const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }) });
     cookie = login.headers.get("set-cookie").split(";")[0];
   });
   after(() => new Promise((r) => server.close(r)));

@@ -146,15 +146,15 @@ function seedSettings(db) {
 }
 
 function seedPosts(db, posts) {
-  db.db.prepare("delete from posts").run();
+  db.db.prepare("delete from posts where user_id=?").run(db.userId);
   const ids = {};
   const insert = db.db.prepare(
-    "insert into posts(head,input,text,status,error,tg_message_id,sent_at,created_at,commits) values(?,?,?,?,?,?,?,?,?)"
+    "insert into posts(user_id,head,input,text,status,error,tg_message_id,sent_at,created_at,commits) values(?,?,?,?,?,?,?,?,?,?)"
   );
   for (const p of [...posts].reverse()) {
     const created = hoursAgo(p.h);
     const info = insert.run(
-      p.commits[0][0], "Коммиты:\n" + p.commits.map((c) => "- " + c[1]).join("\n"), p.text, p.status, p.error || null,
+      db.userId, p.commits[0][0], "Коммиты:\n" + p.commits.map((c) => "- " + c[1]).join("\n"), p.text, p.status, p.error || null,
       p.tg || null, p.status === "sent" ? created.replace(" ", "T") + "Z" : null, created, commitsJson(p.commits)
     );
     ids[p.key] = Number(info.lastInsertRowid);
@@ -182,7 +182,6 @@ async function main() {
   const env = {
     ...process.env,
     PORT: String(PORT),
-    ADMIN_PASSWORD: PASSWORD,
     SESSION_SECRET: crypto.randomBytes(24).toString("hex"),
     ENCRYPTION_KEY: crypto.randomBytes(24).toString("hex"),
     DOMAIN: "notes.example.org",
@@ -191,8 +190,10 @@ async function main() {
   const { createDatabase } = require(path.join(ROOT, "lib", "db"));
   const log = console.log;
   console.log = () => {};
-  const db = createDatabase(path.join(work, "data", "app.db"), env.ENCRYPTION_KEY);
+  const platform = createDatabase(path.join(work, "data", "app.db"), env.ENCRYPTION_KEY);
   console.log = log;
+  // Демонстрационный аккаунт: скриншоты снимаются от его имени
+  const db = platform.forUser(platform.createUser("demo", await require(path.join(ROOT, "lib", "auth")).hash(PASSWORD)));
   seedSettings(db);
 
   const server = spawn(process.execPath, ["-r", path.join(work, "stub.js"), path.join(ROOT, "server.js")], {
@@ -204,19 +205,19 @@ async function main() {
   let browser;
   try {
     await waitForServer(server);
-    const login = await fetch(BASE + "/login", {
+    const login = await fetch(BASE + "/api/auth/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: PASSWORD }),
+      body: JSON.stringify({ username: "demo", password: PASSWORD }),
     });
-    const cookieValue = login.headers.get("set-cookie").split(";")[0].slice(2);
+    const cookieValue = login.headers.get("set-cookie").split(";")[0].slice("sid=".length);
 
     fs.mkdirSync(OUT_DIR, { recursive: true });
     browser = await chromium.launch({ executablePath: findChrome(), headless: true });
 
     const shoot = async (name, { width, height }, theme, prepare) => {
       const context = await browser.newContext({ viewport: { width, height }, colorScheme: theme, reducedMotion: "reduce" });
-      await context.addCookies([{ name: "s", value: cookieValue, url: BASE }]);
+      await context.addCookies([{ name: "sid", value: cookieValue, url: BASE }]);
       const page = await context.newPage();
       await prepare(page);
       await page.screenshot({ path: path.join(OUT_DIR, `${name}-${width}-${theme}.png`) });

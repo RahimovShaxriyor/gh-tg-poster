@@ -5,15 +5,16 @@ const crypto = require("node:crypto");
 const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const { hashPassword, verifyPasswordHash, signCookie } = require("../lib/crypto");
+const { tenantDb, TEST_PASSWORD } = require("./helpers/tenant");
 
 describe("Пароль и сессии", () => {
-  const TEST_PASS = "env-admin-password-777";
+  const TEST_PASS = TEST_PASSWORD;
   let server;
   let baseUrl;
   let ctx;
 
   before(async () => {
-    ctx = { ...createDatabase(":memory:", "sec-test-key"), ADMIN_PASSWORD: TEST_PASS, SESSION_SECRET: "sec-session-secret" };
+    ctx = { ...tenantDb(":memory:", "sec-test-key"), ADMIN_PASSWORD: TEST_PASS, SESSION_SECRET: "sec-session-secret" };
     server = http.createServer(createApp(ctx));
     await new Promise((resolve) => server.listen(0, resolve));
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -24,18 +25,18 @@ describe("Пароль и сессии", () => {
   });
 
   const login = (password) =>
-    fetch(`${baseUrl}/login`, {
+    fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username: "owner", password }),
     });
   const cookieOf = (res) => res.headers.get("set-cookie").split(";")[0];
   const state = (cookie) => fetch(`${baseUrl}/api/state`, { headers: { cookie } });
   const changePassword = (cookie, current, next) =>
-    fetch(`${baseUrl}/api/password`, {
+    fetch(`${baseUrl}/api/auth/change-password`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ current_password: current, new_password: next, confirm_password: next }),
+      body: JSON.stringify({ current_password: current, new_password: next }),
     });
 
   it("hashPassword: scrypt с солью, разные хеши для одного пароля, проверка работает", async () => {
@@ -71,7 +72,7 @@ describe("Пароль и сессии", () => {
     assert.equal(res.status, 200);
     const cookieA2 = cookieOf(res);
 
-    assert.match(ctx.getAdminPasswordHash(), /^scrypt\$/);
+    assert.match(ctx.platform.passwordHashOf(ctx.userId), /^scrypt\$/);
     assert.equal((await state(cookieA)).status, 401, "старая cookie того же браузера отозвана");
     assert.equal((await state(cookieB)).status, 401, "сессия на другом устройстве отозвана");
     assert.equal((await state(cookieA2)).status, 200, "новая cookie работает");
@@ -82,13 +83,13 @@ describe("Пароль и сессии", () => {
 
   it("старый sha256-хеш пароля принимается один раз и пересчитывается в scrypt", async () => {
     const legacy = crypto.createHash("sha256").update("legacy-pass-1").digest("hex");
-    ctx.setAdminPasswordHash(legacy);
+    ctx.platform.setPasswordHash(ctx.userId, legacy);
 
     assert.equal((await login("wrong-pass")).status, 401);
-    assert.equal(ctx.getAdminPasswordHash(), legacy, "при неудачном входе хеш не трогаем");
+    assert.equal(ctx.platform.passwordHashOf(ctx.userId), legacy, "при неудачном входе хеш не трогаем");
 
     assert.equal((await login("legacy-pass-1")).status, 200);
-    assert.match(ctx.getAdminPasswordHash(), /^scrypt\$/);
+    assert.match(ctx.platform.passwordHashOf(ctx.userId), /^scrypt\$/);
     assert.equal((await login("legacy-pass-1")).status, 200);
   });
 });

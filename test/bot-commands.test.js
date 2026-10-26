@@ -5,6 +5,7 @@ const { createDatabase } = require("../lib/db");
 const { handleUpdate, runCheckCommand } = require("../lib/telegram-bot");
 const { textHash } = require("../lib/notify");
 const { waitIdle } = require("../lib/poster");
+const { tenantDb, channelAdmin } = require("./helpers/tenant");
 
 const OWNER = 111;
 const STRANGER = 222;
@@ -40,7 +41,9 @@ describe("Бот в личке: команды /check, /status, /help и кно�
     console.log = () => {};
     console.warn = () => {};
     ctx = {
-      ...createDatabase(":memory:", "bot-test-key"),
+      ...tenantDb(":memory:", "bot-test-key"),
+      // Бот один на платформу: токен из окружения, а не из настроек аккаунта
+      TG_BOT_TOKEN: TOKEN,
       tg: async (method, body) => {
         calls.push({ method, body });
         if (method === "sendMessage" && body.chat_id === "@chan") {
@@ -56,10 +59,11 @@ describe("Бот в личке: команды /check, /status, /help и кно�
     console.log = log;
     console.warn = warn;
     for (const [k, v] of Object.entries({
-      tg_token: TOKEN, tg_owner_chat_id: String(OWNER), channel_id: "@chan",
+      tg_owner_chat_id: String(OWNER), channel_id: "@chan",
       repo: "me/repo", branch: "main", github_token: "t", ai_key: "k", ai_model: "m",
       debounce: "60", digest_tz: "Europe/Moscow",
     })) ctx.set(k, v);
+    ctx.tg = channelAdmin(ctx.tg);
     process.env.DOMAIN = "poster.example.org";
   });
 
@@ -71,7 +75,7 @@ describe("Бот в личке: команды /check, /status, /help и кно�
   });
   const ownerMessages = () => calls.filter((c) => c.method === "sendMessage" && c.body.chat_id === String(OWNER));
   const addDraft = (text = "Текст черновика", extra = "") =>
-    Number(ctx.db.prepare(`insert into posts(head,input,text,status${extra ? "," + extra.split("=")[0] : ""}) values('h','вход',?,'draft'${extra ? "," + extra.split("=")[1] : ""})`).run(text).lastInsertRowid);
+    Number(ctx.db.prepare(`insert into posts(user_id,head,input,text,status${extra ? "," + extra.split("=")[0] : ""}) values(1,'h','вход',?,'draft'${extra ? "," + extra.split("=")[1] : ""})`).run(text).lastInsertRowid);
 
   it("чужому бот не отвечает ни на одну команду и ничего не запускает", async () => {
     for (const text of ["/help", "/status", "/check", "/start", "привет"]) {

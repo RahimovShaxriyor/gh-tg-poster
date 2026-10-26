@@ -32,9 +32,15 @@ main() {
   PREV_SHA="$(cat "$STATE_DIR/previous_sha")"
   CUR_SHA="$(git rev-parse HEAD)"
   DB_COPY=""
+  # Код прежней версии не должен открыть базу более новой схемы: однопользовательская версия
+  # не знает об аккаунтах и показала бы владельцу данные всех пользователей
+  TARGET_SCHEMA="$(code_schema_version "$PREV_SHA")"
+  DB_SCHEMA="$(db_schema_version "$APP_DIR/data/app.db")"
   if [ "$WITH_DB" = 1 ]; then
-    DB_COPY="$(ls -1t "$APP_DIR"/backups/predeploy/app_*.db 2>/dev/null | head -n 1 || true)"
-    [ -n "$DB_COPY" ] || die "Нет копий в backups/predeploy: базу вернуть не из чего."
+    DB_COPY="$(compatible_predeploy_copy "$TARGET_SCHEMA")"
+    [ -n "$DB_COPY" ] || die "В backups/predeploy нет копии, которую понимает $(printf '%s' "$PREV_SHA" | cut -c1-7) (схема до $TARGET_SCHEMA): базу вернуть не из чего, откат отменён."
+  elif [ "$DB_SCHEMA" -gt "$TARGET_SCHEMA" ]; then
+    die "База в схеме $DB_SCHEMA (аккаунты), а $(printf '%s' "$PREV_SHA" | cut -c1-7) понимает только схему $TARGET_SCHEMA: старый код показал бы данные всех аккаунтов. Откат возможен только с базой из копии перед обновлением: deploy/rollback.sh --with-db (данные, созданные после обновления, в неё не входят; текущая база сохранится рядом)."
   fi
 
   confirm "Откат с $(printf '%s' "$CUR_SHA" | cut -c1-7) на $(printf '%s' "$PREV_SHA" | cut -c1-7)${DB_COPY:+ и база из $(basename "$DB_COPY")}."

@@ -4,11 +4,12 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { createDatabase } = require("../lib/db");
-const { handleUpdate, createOwnerCode } = require("../lib/telegram-bot");
+const { handleUpdate, OWNER_CODE_TTL_MS } = require("../lib/telegram-bot");
 const commands = require("../lib/bot-commands");
 const poster = require("../lib/poster");
 const { clearCommitsCache } = require("../lib/commits");
 const { fakeAi } = require("./helpers/fake-ai");
+const { tenantDb } = require("./helpers/tenant");
 
 const OWNER = 111;
 const STRANGER = 222;
@@ -47,7 +48,7 @@ describe("Бот: расширенные команды", () => {
     console.log = () => {};
     console.warn = () => {};
     ctx = {
-      ...createDatabase(":memory:", "bot-more-key"),
+      ...tenantDb(":memory:", "bot-more-key"),
       TG_BOT_TOKEN: TOKEN,
       tg: async (method, body) => {
         calls.push({ method, body });
@@ -86,8 +87,8 @@ describe("Бот: расширенные команды", () => {
   const answers = () => calls.filter((c) => c.method === "answerCallbackQuery").map((c) => c.body);
   const buttons = (m) => (m.reply_markup?.inline_keyboard || []).flat();
   const addPost = (status = "draft", text = "Заголовок\n\nТекст", extra = {}) => {
-    const cols = ["head", "input", "text", "status", ...Object.keys(extra)];
-    const vals = ["h", "вход", text, status, ...Object.values(extra)];
+    const cols = ["user_id", "head", "input", "text", "status", ...Object.keys(extra)];
+    const vals = [ctx.userId, "h", "вход", text, status, ...Object.values(extra)];
     return Number(ctx.db.prepare(`insert into posts(${cols.join(",")}) values(${cols.map(() => "?").join(",")})`).run(...vals).lastInsertRowid);
   };
   const confirmYes = (m) => buttons(m).find((b) => b.callback_data.startsWith("ok:")).callback_data;
@@ -249,7 +250,7 @@ describe("Бот: расширенные команды", () => {
   describe("Коммиты", () => {
     it("/commits: отметка «в посте #N», «Сделать пост» создаёт черновик даже в режиме auto", async () => {
       ctx.set("mode", "auto");
-      ctx.db.prepare("insert into posts(id,head,input,status,text) values(7,'x','i','sent','t')").run();
+      ctx.db.prepare("insert into posts(user_id,id,head,input,status,text) values(1,7,'x','i','sent','t')").run();
       ctx.recordPostCommits(7, [sha("b")]);
       await say("/commits 2");
       const m = lastSent();
@@ -462,7 +463,9 @@ describe("Бот: расширенные команды", () => {
       assert.match(lastSent().text, /Последняя резервная копия: .*зашифрована/);
       ctx.set("last_ok_check", new Date().toISOString());
       await say("/health");
-      for (const re of [/^Версия: /, /Работает: /, /База: /, /Последняя успешная проверка GitHub: /, /GitHub: в порядке/, /Последняя резервная копия/]) assert.match(lastSent().text, re);
+      for (const re of [/^Версия: /, /Работает: /, /Последняя успешная проверка GitHub: /, /GitHub: в порядке/, /Последняя резервная копия/]) assert.match(lastSent().text, re);
+      // Размер базы — сведения о всей платформе, пользователю их не показываем
+      assert.doesNotMatch(lastSent().text, /База: /);
       fs.rmSync(dir, { recursive: true, force: true });
     });
 
@@ -476,7 +479,7 @@ describe("Бот: расширенные команды", () => {
       await say("/status");
       await say("/help");
       assert.equal(calls.length, n, "после отвязки бот молчит");
-      const { code } = createOwnerCode(ctx);
+      const { code } = ctx.platform.createTgLinkCode(ctx.userId, OWNER_CODE_TTL_MS);
       await say(`/start ${code}`);
       assert.equal(ctx.get("tg_owner_chat_id"), String(OWNER));
       assert.ok(ctx.get("tg_owner_bound_at"));

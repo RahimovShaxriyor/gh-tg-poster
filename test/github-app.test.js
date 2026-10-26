@@ -5,6 +5,7 @@ const crypto = require("node:crypto");
 const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const { gh, buildInput, ai, tg } = require("../lib/services");
+const { TEST_PASSWORD, tenantDb } = require("./helpers/tenant");
 const {
   appJwt,
   installationToken,
@@ -50,7 +51,7 @@ describe("GitHub App интеграция", () => {
       return originalFetch(...args);
     };
 
-    const dbBundle = createDatabase(":memory:", TEST_KEY);
+    const dbBundle = tenantDb(":memory:", TEST_KEY);
 
     testCtx = {
       ...dbBundle,
@@ -86,10 +87,10 @@ describe("GitHub App интеграция", () => {
   });
 
   async function getAuthCookie() {
-    const res = await fetch(`${baseUrl}/login`, {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: TEST_PASS }),
+      body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }),
     });
     return res.headers.get("set-cookie").split(";")[0];
   }
@@ -214,7 +215,7 @@ describe("GitHub App интеграция", () => {
 
     // state подписан и привязан именно к этой сессии
     const stateParam = new URL(location).searchParams.get("state");
-    const session = cookie.slice(2);
+    const session = cookie.slice(cookie.indexOf("=") + 1);
     assert.equal(consumeState(testCtx, TEST_PASS, stateParam, { purpose: "install", session }).ok, true);
   });
 

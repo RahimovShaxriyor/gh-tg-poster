@@ -1,7 +1,8 @@
 const { describe, it, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
 const { createDatabase } = require("../lib/db");
-const { createOwnerCode, handleUpdate } = require("../lib/telegram-bot");
+const { handleUpdate, OWNER_CODE_TTL_MS } = require("../lib/telegram-bot");
+const { tenantDb, channelAdmin } = require("./helpers/tenant");
 
 describe("Telegram-бот: привязка владельца и канала, кнопки", () => {
   let ctx;
@@ -10,7 +11,8 @@ describe("Telegram-бот: привязка владельца и канала, 
   beforeEach(() => {
     calls = [];
     ctx = {
-      ...createDatabase(":memory:", "tg-test-key"),
+      ...tenantDb(":memory:", "tg-test-key"),
+      TG_BOT_TOKEN: "123:abc",
       tg: async (method, body) => {
         calls.push({ method, body });
         if (method === "sendMessage" && body.chat_id === "@chan") {
@@ -19,8 +21,10 @@ describe("Telegram-бот: привязка владельца и канала, 
         return { ok: true, result: true };
       },
     };
-    ctx.set("tg_token", "123:abc");
+    ctx.tg = channelAdmin(ctx.tg);
   });
+  // Код привязки выдаёт платформа для конкретного аккаунта (в базе — только его хеш)
+  const createOwnerCode = (c, ttl = OWNER_CODE_TTL_MS) => c.platform.createTgLinkCode(c.userId, ttl);
 
   const startMsg = (chatId, text, username = "owner") => ({
     message: { chat: { id: chatId, type: "private" }, from: { id: chatId, username }, text },
@@ -58,8 +62,7 @@ describe("Telegram-бот: привязка владельца и канала, 
   });
 
   it("истёкший код не принимается", async () => {
-    const { code } = createOwnerCode(ctx);
-    ctx.set("tg_owner_code_exp", String(Date.now() - 1000));
+    const { code } = createOwnerCode(ctx, -1000);
     await handleUpdate(startMsg(111, `/start ${code}`), ctx, "123:abc");
     assert.equal(ctx.get("tg_owner_chat_id"), "");
   });
@@ -90,7 +93,7 @@ describe("Telegram-бот: привязка владельца и канала, 
   it("кнопка «Опубликовать» от не-владельца отклоняется, от владельца публикует", async () => {
     ctx.set("tg_owner_chat_id", "111");
     ctx.set("channel_id", "@chan");
-    const id = ctx.db.prepare("insert into posts(status, text) values('draft', 'Текст')").run().lastInsertRowid;
+    const id = ctx.db.prepare("insert into posts(user_id,status, text) values(1,'draft', 'Текст')").run().lastInsertRowid;
 
     await handleUpdate({ callback_query: { id: "cb1", from: { id: 222 }, data: `pub:${id}` } }, ctx, "123:abc");
     assert.equal(ctx.post(id).status, "draft");

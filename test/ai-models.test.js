@@ -5,6 +5,7 @@ const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const { ai } = require("../lib/services");
 const { listModels, clearModelsCache, CACHE_TTL_MS, TIMEOUT_MS } = require("../lib/ai-models");
+const { TEST_PASSWORD, tenantDb } = require("./helpers/tenant");
 
 const KEY = "sk-ant-api03-SECRETmodelskey1234567890";
 const OPENAI_KEY = "sk-proj-SECRETopenaikey0987654321";
@@ -143,12 +144,12 @@ describe("Подсказки моделей ИИ", () => {
     before(async () => {
       const warn = console.warn;
       console.warn = () => {};
-      ctx = { ...createDatabase(":memory:", "ai-models-key"), ADMIN_PASSWORD: PASS, SESSION_SECRET: "s".repeat(40), ai: (i, f, o) => ai(i, f, o) };
+      ctx = { ...tenantDb(":memory:", "ai-models-key"), ADMIN_PASSWORD: PASS, SESSION_SECRET: "s".repeat(40), ai: (i, f, o) => ai(i, f, o) };
       console.warn = warn;
       server = http.createServer(createApp(ctx));
       await new Promise((r) => server.listen(0, r));
       base = `http://127.0.0.1:${server.address().port}`;
-      const l = await fetch(`${base}/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: PASS }) });
+      const l = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }) });
       cookie = l.headers.get("set-cookie").split(";")[0];
     });
     after(() => new Promise((r) => server.close(r)));

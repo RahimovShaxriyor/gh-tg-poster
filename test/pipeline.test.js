@@ -5,6 +5,7 @@ const poster = require("../lib/poster");
 const services = require("../lib/services");
 const pipeline = require("../lib/pipeline");
 const { fakeAi } = require("./helpers/fake-ai");
+const { tenantDb, channelAdmin } = require("./helpers/tenant");
 
 const SHA_A = "a".repeat(40);
 const SHA_B = "b".repeat(40);
@@ -316,7 +317,7 @@ describe("generate(): конвейер в постах", () => {
   };
   function makeCtx(aiCall, settings = {}) {
     const restore = quiet();
-    const db = createDatabase(":memory:", "pipeline-key");
+    const db = tenantDb(":memory:", "pipeline-key");
     restore();
     const sent = [];
     const ctx = {
@@ -328,11 +329,12 @@ describe("generate(): конвейер в постах", () => {
       },
       TG_BOT_TOKEN: "1:a",
     };
-    for (const [k, v] of Object.entries({ ai_key: "k", ai_model: "main-model", channel_id: "@chan", ...settings })) ctx.set(k, v);
+    for (const [k, v] of Object.entries({ ai_key: "k", ai_model: "main-model", channel_id: "@chan", tg_owner_chat_id: "42", ...settings })) ctx.set(k, v);
+    ctx.tg = channelAdmin(ctx.tg);
     return { ctx, sent };
   }
   const addPost = (ctx, data = DATA) =>
-    Number(ctx.db.prepare("insert into posts(head,input,input_data,status) values('h','вход',?,'draft')").run(JSON.stringify(data)).lastInsertRowid);
+    Number(ctx.db.prepare("insert into posts(user_id,head,input,input_data,status) values(1,'h','вход',?,'draft')").run(JSON.stringify(data)).lastInsertRowid);
 
   it("итог сохраняется: meta с фактами и проверкой, needs_review; модель проверки — из настройки", async () => {
     const calls = [];
@@ -359,7 +361,7 @@ describe("generate(): конвейер в постах", () => {
 
   it("режим auto: текст с непроверенными утверждениями не публикуется сам", async () => {
     const { ctx, sent } = makeCtx(fakeAi({ facts: [fact("f1")], text: "Скорость выросла на 300%" }), { mode: "auto" });
-    const id = Number(ctx.db.prepare("insert into posts(head,input,input_data,status) values('h','вход',?,'generating')").run(JSON.stringify(DATA)).lastInsertRowid);
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,input_data,status) values(1,'h','вход',?,'generating')").run(JSON.stringify(DATA)).lastInsertRowid);
     const r = await poster.generate(id, false, ctx, false, { locked: true, autoPublish: true, notify: false });
     assert.equal(r.status, "draft");
     assert.equal(sent.length, 0);
@@ -368,7 +370,7 @@ describe("generate(): конвейер в постах", () => {
 
   it("режим auto: проверенный текст публикуется как раньше", async () => {
     const { ctx, sent } = makeCtx(fakeAi({ facts: [fact("f1")], text: "Появился экспорт" }), { mode: "auto" });
-    const id = Number(ctx.db.prepare("insert into posts(head,input,input_data,status) values('h','вход',?,'generating')").run(JSON.stringify(DATA)).lastInsertRowid);
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,input_data,status) values(1,'h','вход',?,'generating')").run(JSON.stringify(DATA)).lastInsertRowid);
     const r = await poster.generate(id, false, ctx, false, { locked: true, autoPublish: true, notify: false });
     assert.equal(r.status, "sent");
     // В канал — текст и подпись от кода; в базе — только текст
@@ -380,7 +382,7 @@ describe("generate(): конвейер в постах", () => {
   it("старый пост без input_data: вход берётся из текста, sha не проверяются", async () => {
     const calls = [];
     const { ctx } = makeCtx(fakeAi({ facts: [fact("f1", { evidence: [] })], text: "Готово", calls }));
-    const id = Number(ctx.db.prepare("insert into posts(head,input,status) values('h','Коммиты:\n- feat: старый вход','draft')").run().lastInsertRowid);
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,status) values(1,'h','Коммиты:\n- feat: старый вход','draft')").run().lastInsertRowid);
     const r = await poster.generate(id, true, ctx);
     assert.equal(r.status, "draft");
     assert.match(calls[0].user, /^<changes>\nКоммиты:\n- feat: старый вход\n<\/changes>$/);

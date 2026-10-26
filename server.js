@@ -11,8 +11,7 @@ const { cleanError } = require("./lib/crypto");
 const { handleUpdate, registerCommands, refreshBotInfo } = require("./lib/telegram-bot");
 const { botToken, botTokenSource } = require("./lib/notify");
 
-const PASS = process.env.ADMIN_PASSWORD;
-const SECRET = process.env.SESSION_SECRET || PASS;
+const SECRET = process.env.SESSION_SECRET;
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = "data";
@@ -32,17 +31,17 @@ function checkEnv() {
         .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)])
     );
   } catch {}
-  for (const k of ["ADMIN_PASSWORD", "SESSION_SECRET", "ENCRYPTION_KEY"]) {
+  for (const k of ["SESSION_SECRET", "ENCRYPTION_KEY"]) {
     if (process.env[k] && example[k] && process.env[k] === example[k]) {
       problems.push(`${k} совпадает с примером из .env.example: придумайте своё значение`);
     }
   }
-  if (!PASS) problems.push("Задай ADMIN_PASSWORD в .env");
+  if (!ENCRYPTION_KEY) problems.push("Задай ENCRYPTION_KEY в .env: им шифруются ключи ИИ и токены GitHub пользователей (openssl rand -hex 32)");
   if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
     problems.push("Задай SESSION_SECRET в .env: случайная строка не короче 32 символов (openssl rand -hex 32)");
   }
-  if (PASS && PASS.length < 12) {
-    console.warn("Предупреждение: ADMIN_PASSWORD короче 12 символов, его легче подобрать.");
+  if (process.env.ADMIN_PASSWORD) {
+    console.warn("ADMIN_PASSWORD больше не используется: у каждого свой аккаунт. Данные прежней версии переносятся командой node scripts/claim-legacy.js.");
   }
   if (problems.length) {
     for (const p of problems) console.error(p);
@@ -75,13 +74,27 @@ if (require.main === module) {
 
 const dbBundle = createDatabase(path.join(DATA_DIR, "app.db"), ENCRYPTION_KEY);
 
+// Общие сервисы и настройки окружения. Данных аккаунта здесь нет: их даёт userCtx(id)
 const ctx = {
-  ...dbBundle,
-  ADMIN_PASSWORD: PASS,
+  platform: dbBundle,
   SESSION_SECRET: SECRET,
   ENCRYPTION_KEY,
-  // Один бот на весь сервис: токен только из окружения
+  // Регистрация открыта всем; REGISTRATION_OPEN=0 закрывает её (например, для личного сервера)
+  REGISTRATION_OPEN: process.env.REGISTRATION_OPEN !== "0",
+  REGISTRATION_LIMIT_PER_HOUR: Number(process.env.REGISTRATION_LIMIT_PER_HOUR) || 100,
+  // Пределы для маленького сервера (необязательно, значения по умолчанию — в коде)
+  MAX_USERS: Number(process.env.MAX_USERS) || 50,
+  MAX_POSTS_PER_USER: Number(process.env.MAX_POSTS_PER_USER) || 1000,
+  AI_TASKS_PER_HOUR: Number(process.env.AI_TASKS_PER_HOUR) || 10,
+  AI_GLOBAL: Number(process.env.AI_MAX_CONCURRENT) || 2,
+  AI_PER_USER: Number(process.env.AI_MAX_CONCURRENT_PER_USER) || 1,
+  API_REQUESTS_PER_5MIN: Number(process.env.API_REQUESTS_PER_5MIN) || 600,
+  REGISTRATION_PER_IP_PER_HOUR: Number(process.env.REGISTRATION_PER_IP_PER_HOUR) || 3,
+  REGISTRATION_PER_IP_PER_DAY: Number(process.env.REGISTRATION_PER_IP_PER_DAY) || 5,
+  JSON_BODY_LIMIT: process.env.JSON_BODY_LIMIT || "100kb",
+  // Один бот на всю платформу: токен только из окружения, пользователям не передаётся
   TG_BOT_TOKEN: (process.env.TG_BOT_TOKEN || "").trim(),
+  getLegacyBotToken: dbBundle.getLegacyBotToken,
   gh,
   tg,
   deleteWebhook,
@@ -89,37 +102,76 @@ const ctx = {
   aiCall,
   buildInput,
   buildInputData,
-  post: dbBundle.post,
-  getPosts: dbBundle.getPosts,
-  countPosts: dbBundle.countPosts,
-  deletePost: dbBundle.deletePost,
-  GITHUB_APP_ID: process.env.GITHUB_APP_ID,
-  GITHUB_APP_SLUG: process.env.GITHUB_APP_SLUG,
-  GITHUB_APP_PRIVATE_KEY_B64: process.env.GITHUB_APP_PRIVATE_KEY_B64,
-  GITHUB_APP_PRIVATE_KEY_PATH: process.env.GITHUB_APP_PRIVATE_KEY_PATH,
 };
+const userCtx = (userId) => ({ ...ctx, ...dbBundle.forUser(userId) });
 
+// ===== Планировщик проверок GitHub =====
+// Один таймер на весь сервер: раз в 30 секунд он смотрит, чьи проверки подошли, и ставит их в очередь.
+// Одновременно идёт не больше CHECK_CONCURRENCY проверок; у каждого аккаунта своё расписание и состояние,
+// ошибка одного аккаунта не мешает остальным.
+const TICK_MS = 30 * 1000;
+const CHECK_CONCURRENCY = 2;
 let stopping = false;
-let pollIntervalTimer = null;
-let nextPollAt = null;
-function schedulePoll() {
-  if (pollIntervalTimer) clearInterval(pollIntervalTimer);
-  const ms = Math.max(1, Math.min(60, Number(dbBundle.get("poll_interval", "5")) || 5)) * 60 * 1000;
-  nextPollAt = Date.now() + ms;
-  pollIntervalTimer = setInterval(() => {
-    nextPollAt = Date.now() + ms;
-    if (!stopping) check(false, ctx);
-  }, ms);
+const nextDue = new Map(); // userId → время следующей проверки
+const queue = [];
+const queued = new Set();
+let running = 0;
+
+// Не чаще MIN_POLL_MINUTES (по умолчанию 5): тысяча аккаунтов с интервалом 1 мин перегрузили бы сервер и GitHub API
+const MIN_POLL_MINUTES = Math.max(1, Number(process.env.MIN_POLL_MINUTES) || 5);
+const intervalMs = (uctx) => Math.max(MIN_POLL_MINUTES, Math.min(60, Number(uctx.get("poll_interval", "5")) || 5)) * 60 * 1000;
+
+// После смены интервала в настройках: следующая проверка — через новый интервал
+function schedulePoll(userId) {
+  if (userId === undefined || userId === null) return;
+  nextDue.set(Number(userId), Date.now() + intervalMs(userCtx(userId)));
 }
 ctx.schedulePoll = schedulePoll;
-ctx.getNextPollAt = () => nextPollAt;
+ctx.getNextPollAt = (userId) => nextDue.get(Number(userId)) || null;
+
+function pump() {
+  while (!stopping && running < CHECK_CONCURRENCY && queue.length) {
+    const uid = queue.shift();
+    running++;
+    Promise.resolve()
+      .then(() => check(false, userCtx(uid)))
+      .catch((err) => console.error(`Проверка аккаунта #${uid} не удалась:`, cleanError(err?.message || err)))
+      .finally(() => {
+        running--;
+        queued.delete(uid);
+        pump();
+      });
+  }
+}
+
+let ticks = 0;
+function tick() {
+  if (stopping) return;
+  const now = Date.now();
+  try {
+    for (const uid of dbBundle.usersWithRepo()) {
+      // Первый раз — с небольшим сдвигом, чтобы после перезапуска аккаунты не проверялись разом
+      if (!nextDue.has(uid)) nextDue.set(uid, now + 5000 + (uid % 60) * 1000);
+      if (nextDue.get(uid) > now || queued.has(uid)) continue;
+      nextDue.set(uid, now + intervalMs(userCtx(uid)));
+      queued.add(uid);
+      queue.push(uid);
+    }
+    // Раз в час — уборка истёкших и отозванных сессий
+    if (++ticks % 120 === 0) dbBundle.purgeSessions();
+  } catch (err) {
+    console.error("Ошибка планировщика:", cleanError(err.message));
+  }
+  pump();
+}
+let schedulerTimer = null;
 
 const app = createApp(ctx);
 
 // Фоновый цикл Telegram: автоопределение канала, команды и кнопки владельца
 let tgLoopRunning = false;
 let lastWebhookDeletedToken = null;
-let commandsRegisteredFor = null;
+const commandsRegisteredFor = new Set();
 
 async function startTgLoop() {
   if (tgLoopRunning) return;
@@ -140,12 +192,15 @@ async function startTgLoop() {
         lastWebhookDeletedToken = token;
       }
 
-      // Меню команд в личке владельца: один раз на пару «бот + владелец»
-      const owner = dbBundle.get("tg_owner_chat_id");
-      if (owner && commandsRegisteredFor !== token + "|" + owner) {
-        const reg = await registerCommands(ctx, token);
-        if (reg?.ok) commandsRegisteredFor = token + "|" + owner;
-        else console.error("Не удалось зарегистрировать команды бота:", cleanError(reg?.description));
+      // Меню команд в личке каждого привязанного пользователя: один раз на пару «бот + чат»
+      for (const { user_id: uid, chat_id: chat } of dbBundle.ownerChats()) {
+        if (commandsRegisteredFor.has(token + "|" + chat)) continue;
+        const reg = await registerCommands(userCtx(uid), token);
+        if (reg?.ok) commandsRegisteredFor.add(token + "|" + chat);
+        else {
+          console.error("Не удалось зарегистрировать команды бота:", cleanError(reg?.description));
+          break;
+        }
       }
 
       const r = await tg(
@@ -183,7 +238,7 @@ function shutdown(server, signal) {
   if (stopping) return;
   stopping = true;
   console.log(`Получен ${signal}, завершаю работу…`);
-  if (pollIntervalTimer) clearInterval(pollIntervalTimer);
+  if (schedulerTimer) clearInterval(schedulerTimer);
   server.close();
   waitIdle(25000).then((idle) => {
     if (!idle) console.warn("Не все операции успели завершиться: при старте они будут помечены как прерванные.");
@@ -208,10 +263,8 @@ if (require.main === module) {
     });
   }
   startTgLoop().catch((err) => console.error("Ошибка startTgLoop:", cleanError(err.message)));
-  setTimeout(() => {
-    if (!stopping) check(false, ctx);
-  }, 5000);
-  schedulePoll();
+  schedulerTimer = setInterval(tick, TICK_MS);
+  setTimeout(tick, 5000);
 
   process.on("unhandledRejection", (e) => console.error("Необработанная ошибка промиса:", cleanError(e?.message || e)));
   const server = app.listen(PORT, () => console.log("Готово: порт", PORT));
@@ -222,15 +275,13 @@ if (require.main === module) {
 module.exports = {
   app,
   ctx,
+  userCtx,
   db: dbBundle.db,
-  get: dbBundle.get,
-  set: dbBundle.set,
-  post: dbBundle.post,
   createDatabase,
   createApp,
-  check: (force) => check(force, ctx),
-  publish: (id, text) => publish(id, text, ctx),
-  generate: (id, force) => generate(id, force, ctx),
+  check: (userId, force) => check(force, userCtx(userId)),
+  publish: (userId, id, text) => publish(id, text, userCtx(userId)),
+  generate: (userId, id, force) => generate(id, force, userCtx(userId)),
   buildInput,
   ai,
   gh,
@@ -239,4 +290,5 @@ module.exports = {
   cleanError,
   schedulePoll,
   startTgLoop,
+  tick,
 };

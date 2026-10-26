@@ -3,10 +3,9 @@
 set -eu
 command -v openssl >/dev/null 2>&1 || { echo "Нужен openssl" >&2; exit 1; }
 
-pass="$(openssl rand -base64 30 | tr -d '/+=\n' | cut -c1-28)"
 cat <<OUT
 # Вставьте в .env на сервере (chmod 600 .env). Повторный запуск даст другие значения.
-ADMIN_PASSWORD=$pass
+# Пароля администратора нет: аккаунты создаются регистрацией на сайте.
 SESSION_SECRET=$(openssl rand -hex 32)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
 

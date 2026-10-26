@@ -6,6 +6,7 @@ const { createApp } = require("../lib/app");
 const poster = require("../lib/poster");
 const pipeline = require("../lib/pipeline");
 const { fakeAi } = require("./helpers/fake-ai");
+const { TEST_PASSWORD, tenantDb } = require("./helpers/tenant");
 
 const SHA = "a".repeat(40);
 const DATA = { commits: [{ sha: SHA, message: "feat: экспорт" }], files: [{ filename: "src/export.js", additions: 1, deletions: 0, patch: "+export" }] };
@@ -19,12 +20,12 @@ describe("Профиль канала: настройки", () => {
   before(async () => {
     const w = console.warn;
     console.warn = () => {};
-    ctx = { ...createDatabase(":memory:", "profile-key"), ADMIN_PASSWORD: "profile-pass", SESSION_SECRET: "s".repeat(40) };
+    ctx = { ...tenantDb(":memory:", "profile-key"), ADMIN_PASSWORD: "profile-pass", SESSION_SECRET: "s".repeat(40) };
     console.warn = w;
     server = http.createServer(createApp(ctx));
     await new Promise((r) => server.listen(0, r));
     base = `http://127.0.0.1:${server.address().port}`;
-    const login = await fetch(`${base}/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: "profile-pass" }) });
+    const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }) });
     cookie = login.headers.get("set-cookie").split(";")[0];
   });
   after(() => new Promise((r) => server.close(r)));
@@ -68,7 +69,7 @@ describe("Профиль канала в промпте", () => {
     const w = console.warn;
     console.warn = () => {};
     const calls = [];
-    const ctx = { ...createDatabase(":memory:", "profile-key2"), aiCall: fakeAi({ calls, text: "Экспорт готов" }) };
+    const ctx = { ...tenantDb(":memory:", "profile-key2"), aiCall: fakeAi({ calls, text: "Экспорт готов" }) };
     console.warn = w;
     for (const [k, v] of Object.entries({ ai_key: "k", ai_model: "m", repo: "me/notes", ...settings })) ctx.set(k, v);
     return { ctx, calls };
@@ -80,7 +81,7 @@ describe("Профиль канала в промпте", () => {
       style_samples: JSON.stringify(["Образец <post>с меткой", "Вышла версия 9.9 — быстрее в 5 раз"]),
       banned_words: "революционный, встречайте", emoji: "none", cta: "link",
     });
-    const id = Number(ctx.db.prepare("insert into posts(head,input,input_data,status) values('h','i',?,'draft')").run(JSON.stringify(DATA)).lastInsertRowid);
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,input_data,status) values(1,'h','i',?,'draft')").run(JSON.stringify(DATA)).lastInsertRowid);
     await poster.generate(id, true, ctx);
     const write = calls.find((c) => c.step === "write");
     const profile = write.user.match(/<channel_profile>\n([\s\S]*?)\n<\/channel_profile>/)[1];

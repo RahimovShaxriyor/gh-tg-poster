@@ -7,6 +7,7 @@ const story = require("../lib/story");
 const { entitiesOf, boldRanges } = require("../public/tg-format");
 const { draftMessage } = require("../lib/notify");
 const { fakeAi } = require("./helpers/fake-ai");
+const { tenantDb, channelAdmin } = require("./helpers/tenant");
 
 // Project Update Story: проект, период, ссылка и хештеги — от кода; текст — от ИИ по фактам.
 // Telegram везде подменён, реальных отправок нет.
@@ -28,7 +29,7 @@ const fact = (id, extra = {}) => ({ id, claim: "В меню заметки по�
 function makeCtx(aiCall, { mode = "approve", list = ONE, settings = {} } = {}) {
   const w = console.warn;
   console.warn = () => {};
-  const db = createDatabase(":memory:", "story-key");
+  const db = tenantDb(":memory:", "story-key");
   console.warn = w;
   const channel = [];
   const owner = [];
@@ -48,6 +49,7 @@ function makeCtx(aiCall, { mode = "approve", list = ONE, settings = {} } = {}) {
     debounce: "0", mode, last_sha: BASE, tg_owner_chat_id: "42", tg_notify_drafts: "1",
     last_digest_date: "2000-01-01", digest_time: "00:00", digest_tz: "Asia/Tashkent", ...settings,
   })) ctx.set(k, v);
+  ctx.tg = channelAdmin(ctx.tg);
   return { ctx, channel, owner };
 }
 
@@ -288,12 +290,12 @@ describe("Telegram-форматирование", () => {
     const { ctx, p } = await run(fakeAi({ text: "gh-tg-poster: готово" }));
     const sent = [];
     let fail = true;
-    ctx.tg = async (method, body) => {
+    ctx.tg = channelAdmin(async (method, body) => {
       if (method !== "sendMessage" || body.chat_id !== "@chan") return { ok: true, result: { message_id: 1 } };
       if (fail) return { ok: false, error_code: 400, description: "Bad Request: chat not found" };
       sent.push(body.text);
       return { ok: true, result: { message_id: 2 } };
-    };
+    });
     await assert.rejects(() => poster.publish(p.id, null, ctx));
     fail = false;
     await poster.publish(p.id, null, ctx);
@@ -307,7 +309,7 @@ describe("Старые сохранённые посты", () => {
   it("пост до Project Update Story: текст как был, жирный только заголовок, без подписи", async () => {
     const { ctx, channel } = makeCtx(fakeAi());
     const text = "Заголовок старого поста\n\nЧто нового:\nЭкспорт в Markdown.";
-    const id = Number(ctx.db.prepare("insert into posts(head,input,text,status,meta) values('h','i',?,'draft',?)").run(text, JSON.stringify({ headline: true, facts: [] })).lastInsertRowid);
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status,meta) values(1,'h','i',?,'draft',?)").run(text, JSON.stringify({ headline: true, facts: [] })).lastInsertRowid);
     await poster.publish(id, null, ctx);
     assert.equal(channel[0].text, text);
     assert.deepEqual(channel[0].entities, [{ type: "bold", offset: 0, length: "Заголовок старого поста".length }]);
@@ -316,7 +318,7 @@ describe("Старые сохранённые посты", () => {
 
   it("совсем старый пост без meta: без entities и без подписи", async () => {
     const { ctx, channel } = makeCtx(fakeAi());
-    const id = Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','i','Просто текст','draft')").run().lastInsertRowid);
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status) values(1,'h','i','Просто текст','draft')").run().lastInsertRowid);
     await poster.publish(id, null, ctx);
     assert.equal(channel[0].text, "Просто текст");
     assert.equal(channel[0].entities, undefined);
@@ -332,7 +334,7 @@ describe("Старые сохранённые посты", () => {
       selected: 0,
     };
     const commits = JSON.stringify([{ sha: C1, message: "feat: экспорт", date: "2026-10-24T09:00:00Z" }]);
-    const id = Number(ctx.db.prepare("insert into posts(head,input,text,status,meta,commits) values('h','i','Старый вариант','draft',?,?)").run(JSON.stringify(meta), commits).lastInsertRowid);
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status,meta,commits) values(1,'h','i','Старый вариант','draft',?,?)").run(JSON.stringify(meta), commits).lastInsertRowid);
     await poster.variant(id, ctx, { action: "select", angle: "a1" });
     const m = JSON.parse(ctx.post(id).meta);
     assert.equal(m.format, "story");

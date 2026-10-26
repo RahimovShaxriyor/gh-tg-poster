@@ -5,6 +5,7 @@ const poster = require("../lib/poster");
 const pipeline = require("../lib/pipeline");
 const { fakeAi } = require("./helpers/fake-ai");
 const F = require("./fixtures/dashboard");
+const { tenantDb, channelAdmin } = require("./helpers/tenant");
 
 const PROFILE = { emoji: "few", cta: "question" };
 const codeWords = pipeline.codeWordsOf(F.DATA);
@@ -105,7 +106,7 @@ describe("Регрессия: режимы и прежние посты с пр�
     console.warn = () => {};
     const channel = [];
     const ctx = {
-      ...createDatabase(":memory:", "fixture-key"),
+      ...tenantDb(":memory:", "fixture-key"),
       aiCall: fakeAi({ facts: F.FACTS, angles: F.ANGLES, raw: { write: variantsOf(F.AFTER.users) } }),
       TG_BOT_TOKEN: "1:a",
       gh: async () => ({ ok: true, status: 200, json: async () => [
@@ -116,7 +117,8 @@ describe("Регрессия: режимы и прежние посты с пр�
       tg: async (m, body) => (body.chat_id === "@chan" && channel.push(body), { ok: true, result: { message_id: 1 } }),
     };
     console.warn = w;
-    for (const [k, v] of Object.entries({ repo: "me/pms", github_token: "t", channel_id: "@chan", ai_key: "k", ai_model: "m", debounce: "0", mode, last_sha: "0".repeat(40), audience: "users", cta: "question", last_digest_date: "2000-01-01", digest_time: "00:00" })) ctx.set(k, v);
+    for (const [k, v] of Object.entries({ repo: "me/pms", github_token: "t", channel_id: "@chan", tg_owner_chat_id: "42", ai_key: "k", ai_model: "m", debounce: "0", mode, last_sha: "0".repeat(40), audience: "users", cta: "question", last_digest_date: "2000-01-01", digest_time: "00:00" })) ctx.set(k, v);
+    ctx.tg = channelAdmin(ctx.tg);
     return { ctx, channel };
   }
 

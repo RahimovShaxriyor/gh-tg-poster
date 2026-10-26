@@ -5,6 +5,7 @@ const http = require("node:http");
 const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const { check } = require("../lib/poster");
+const { tenantDb, TEST_PASSWORD } = require("./helpers/tenant");
 
 describe("Настройки, прокси, дайджест", () => {
   const TEST_PASS = "settings-test-pass";
@@ -16,7 +17,7 @@ describe("Настройки, прокси, дайджест", () => {
 
   before(async () => {
     ctx = {
-      ...createDatabase(":memory:", "settings-test-key"),
+      ...tenantDb(":memory:", "settings-test-key"),
       ADMIN_PASSWORD: TEST_PASS,
       SESSION_SECRET: TEST_PASS,
       // Шаг написания конвейера: промпт дайджеста или обычного поста
@@ -28,7 +29,7 @@ describe("Настройки, прокси, дайджест", () => {
     server = http.createServer(createApp(ctx));
     await new Promise((resolve) => server.listen(0, resolve));
     baseUrl = `http://127.0.0.1:${server.address().port}`;
-    const res = await login(TEST_PASS);
+    const res = await login(TEST_PASSWORD);
     cookie = res.headers.get("set-cookie").split(";")[0];
   });
 
@@ -37,10 +38,10 @@ describe("Настройки, прокси, дайджест", () => {
   });
 
   function login(password, headers = {}) {
-    return fetch(`${baseUrl}/login`, {
+    return fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username: "owner", password }),
     });
   }
 
@@ -52,7 +53,7 @@ describe("Настройки, прокси, дайджест", () => {
     });
 
   it("POST /api/settings игнорирует ключи вне белого списка", async () => {
-    ctx.setAdminPasswordHash("original-hash");
+    const hashBefore = ctx.platform.passwordHashOf(ctx.userId);
     ctx.set("last_sha", "sha-before");
     ctx.set("pending_head", "pending-before");
     ctx.set("tg_owner_chat_id", "111");
@@ -60,6 +61,8 @@ describe("Настройки, прокси, дайджест", () => {
 
     const res = await saveSettings({
       admin_password_hash: "attacker-hash",
+      password_hash: "attacker-hash",
+      user_id: "999",
       owner_id: "666",
       tg_owner_chat_id: "666",
       tg_owner_username: "@attacker",
@@ -71,16 +74,15 @@ describe("Настройки, прокси, дайджест", () => {
     });
     assert.equal(res.status, 200);
 
-    assert.equal(ctx.getAdminPasswordHash(), "original-hash");
-    assert.equal(ctx.getRaw("owner_id"), undefined);
+    assert.equal(ctx.platform.passwordHashOf(ctx.userId), hashBefore);
+    assert.equal(ctx.get("owner_id"), "");
+    assert.equal(ctx.get("user_id"), "");
     assert.equal(ctx.get("tg_owner_chat_id"), "111");
     assert.equal(ctx.get("tg_owner_username"), "");
     assert.equal(ctx.get("last_sha"), "sha-before");
     assert.equal(ctx.get("pending_head"), "pending-before");
     assert.equal(ctx.get("github_installation_id"), "");
     assert.equal(ctx.get("tone"), "разрешённое поле");
-
-    ctx.setAdminPasswordHash("");
   });
 
   it("POST /api/settings отклоняет неверные значения и ничего не сохраняет", async () => {
@@ -118,8 +120,8 @@ describe("Настройки, прокси, дайджест", () => {
     const pendingAt = Date.now();
     ctx.set("pending_at", pendingAt);
     ctx.db.prepare("delete from posts").run();
-    ctx.db.prepare("insert into posts(status, text) values('sending', 't')").run();
-    ctx.recoverStuckSending();
+    ctx.db.prepare("insert into posts(user_id,status, text) values(1,'sending', 't')").run();
+    ctx.platform.recoverStuckSending();
 
     const state = await (await fetch(`${baseUrl}/api/state`, { headers: { cookie } })).json();
     assert.equal(state.debounce_until, new Date(pendingAt + 10 * 60000).toISOString());
@@ -137,7 +139,7 @@ describe("Настройки, прокси, дайджест", () => {
       const res = await login("wrong", { "x-forwarded-for": `198.51.100.${i}, ${realIp}` });
       assert.equal(res.status, 401);
     }
-    const blocked = await login(TEST_PASS, { "x-forwarded-for": `198.51.100.77, ${realIp}` });
+    const blocked = await login(TEST_PASSWORD, { "x-forwarded-for": `198.51.100.77, ${realIp}` });
     assert.equal(blocked.status, 429, "подмена левой части XFF не обходит блокировку");
 
     const otherClient = await login("wrong", { "x-forwarded-for": "203.0.113.9" });
@@ -162,7 +164,7 @@ describe("Настройки, прокси, дайджест", () => {
   it("дайджест передаёт ctx в buildInput и помечает пост как digest; regen дайджеста идёт с промптом дайджеста", async () => {
     const calls = [];
     const digestCtx = {
-      ...createDatabase(":memory:", "k"),
+      ...tenantDb(":memory:", "k"),
       gh: async () =>
         new Response(
           JSON.stringify([
@@ -199,8 +201,8 @@ describe("Настройки, прокси, дайджест", () => {
     ctx.set("ai_key", "k");
     ctx.set("ai_model", "m");
     ctx.set("mode", "approve");
-    const digestId = ctx.db.prepare("insert into posts(status, input, kind) values('skipped', 'x', 'digest')").run().lastInsertRowid;
-    const commitId = ctx.db.prepare("insert into posts(status, input) values('skipped', 'x')").run().lastInsertRowid;
+    const digestId = ctx.db.prepare("insert into posts(user_id,status, input, kind) values(1,'skipped', 'x', 'digest')").run().lastInsertRowid;
+    const commitId = ctx.db.prepare("insert into posts(user_id,status, input) values(1,'skipped', 'x')").run().lastInsertRowid;
 
     aiCalls.length = 0;
     for (const id of [digestId, commitId]) {

@@ -7,6 +7,7 @@ const { buildInput, ai } = require("../lib/services");
 const { publish, generate, check } = require("../lib/poster");
 const { encrypt, decrypt } = require("../lib/crypto");
 const { anthropicFetch } = require("./helpers/fake-ai");
+const { TEST_PASSWORD, tenantDb, channelAdmin } = require("./helpers/tenant");
 
 describe("gh-tg-web тесты", () => {
   const TEST_PASS = "admin-secret-password-123";
@@ -30,7 +31,7 @@ describe("gh-tg-web тесты", () => {
       return originalFetch(...args);
     };
 
-    const dbBundle = createDatabase(":memory:", TEST_KEY);
+    const dbBundle = tenantDb(":memory:", TEST_KEY);
 
     testCtx = {
       ...dbBundle,
@@ -57,6 +58,9 @@ describe("gh-tg-web тесты", () => {
       buildInput: (repo, base, head, msgs, token) => buildInput(repo, base, head, msgs, token),
     };
 
+    testCtx.tg = channelAdmin(testCtx.tg);
+    // Привязанный Telegram аккаунта — администратор канала (это проверяется перед каждой публикацией)
+    testCtx.set("tg_owner_chat_id", "999000");
     const app = createApp(testCtx);
 
     server = http.createServer(app);
@@ -78,23 +82,23 @@ describe("gh-tg-web тесты", () => {
 
   // 1. Вход с неверным и верным паролем
   it("вход: неверный пароль возвращает 401, верный возвращает 200 и cookie", async () => {
-    const badRes = await fetch(`${baseUrl}/login`, {
+    const badRes = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: "wrong" }),
+      body: JSON.stringify({ username: "owner", password: "wrong" }),
     });
     assert.equal(badRes.status, 401);
     const badJson = await badRes.json();
-    assert.equal(badJson.error, "Неверный пароль");
+    assert.equal(badJson.error, "Неверное имя или пароль");
 
-    const okRes = await fetch(`${baseUrl}/login`, {
+    const okRes = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: TEST_PASS }),
+      body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }),
     });
     assert.equal(okRes.status, 200);
     const setCookie = okRes.headers.get("set-cookie");
-    assert.ok(setCookie && setCookie.includes("s="));
+    assert.ok(setCookie && setCookie.startsWith("sid=") && /HttpOnly/.test(setCookie) && /SameSite=Lax/.test(setCookie));
   });
 
   // 2. 401 на /api без cookie
@@ -105,12 +109,15 @@ describe("gh-tg-web тесты", () => {
     assert.equal(json.error, "auth");
   });
 
+  // Значение настройки аккаунта как оно лежит в базе (секреты — зашифрованными)
+  const rawSetting = (c, k) => c.db.prepare("select v from user_settings where user_id=? and k=?").get(c.userId, k)?.v;
+
   // Вспомогательная функция для получения сессионной cookie
   async function getAuthCookie() {
-    const res = await fetch(`${baseUrl}/login`, {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: TEST_PASS }),
+      body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }),
     });
     const header = res.headers.get("set-cookie");
     return header.split(";")[0];
@@ -145,7 +152,8 @@ describe("gh-tg-web тесты", () => {
     assert.equal(state.settings.ai_key_set, true);
 
     // Токен бота через настройки больше не принимается: он задаётся только TG_BOT_TOKEN в .env
-    assert.equal(testCtx.getRaw("tg_token"), undefined);
+    assert.equal(rawSetting(testCtx, "tg_token"), undefined);
+    assert.equal(testCtx.platform.getRaw("tg_token"), undefined);
     assert.equal(state.settings.tg_token_set, undefined);
     assert.equal(stateText.includes("ABC-DEF1234ghIkl"), false);
 
@@ -155,7 +163,7 @@ describe("gh-tg-web тесты", () => {
     assert.equal(state.settings.ai_key, undefined);
 
     // В базе данных секрет зашифрован
-    const rawVal = testCtx.getRaw("github_token");
+    const rawVal = rawSetting(testCtx, "github_token");
     assert.ok(rawVal.startsWith("enc:v1:"));
     assert.notEqual(rawVal, "ghp_super_secret_token_123");
 
@@ -233,7 +241,7 @@ describe("gh-tg-web тесты", () => {
   it("режим auto: созданный пост автоматически отправляется в канал", async () => {
     testCtx.set("mode", "auto");
     testCtx.set("channel_id", "@testchannel");
-    testCtx.set("tg_token", "123:test");
+    testCtx.TG_BOT_TOKEN = "123:test";
     testCtx.set("last_sha", "c1");
 
     let tgSent = false;
@@ -307,7 +315,7 @@ describe("gh-tg-web тесты", () => {
   // 7. Ошибку Telegram
   it("ошибка Telegram: пост получает статус failed с понятной ошибкой без токена", async () => {
     const { lastInsertRowid } = testCtx.db
-      .prepare("insert into posts(head,input,text,status) values(?,?,?,?)")
+      .prepare("insert into posts(user_id,head,input,text,status) values(1,?,?,?,?)")
       .run("head-tg-err", "input", "Текст для отправки", "draft");
     const postId = Number(lastInsertRowid);
 
@@ -338,7 +346,7 @@ describe("gh-tg-web тесты", () => {
   // 8. Двойную публикацию
   it("двойная публикация: второй запрос блокируется атомарным переходом статуса", async () => {
     const { lastInsertRowid } = testCtx.db
-      .prepare("insert into posts(head,input,text,status) values(?,?,?,?)")
+      .prepare("insert into posts(user_id,head,input,text,status) values(1,?,?,?,?)")
       .run("head-dbl", "input", "Пост для проверки двойного клика", "draft");
     const postId = Number(lastInsertRowid);
 
@@ -450,7 +458,7 @@ describe("gh-tg-web тесты", () => {
   it("сервер запрещает генерацию другого варианта для уже отправленного поста", async () => {
     const cookie = await getAuthCookie();
     const { lastInsertRowid } = testCtx.db
-      .prepare("insert into posts(head,input,text,status) values(?,?,?,?)")
+      .prepare("insert into posts(user_id,head,input,text,status) values(1,?,?,?,?)")
       .run("head-sent", "input", "Отправленный пост", "sent");
     const postId = Number(lastInsertRowid);
 
@@ -477,34 +485,35 @@ describe("gh-tg-web тесты", () => {
   it("rate limiting блокирует вход после 5 неудачных попыток", async () => {
     const testIp = "198.51.100.99";
     for (let i = 0; i < 5; i++) {
-      const res = await fetch(`${baseUrl}/login`, {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-forwarded-for": testIp },
-        body: JSON.stringify({ password: "wrong-password" }),
+        body: JSON.stringify({ username: "owner", password: "wrong-password" }),
       });
       assert.equal(res.status, 401);
     }
 
-    const blockedRes = await fetch(`${baseUrl}/login`, {
+    const blockedRes = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-forwarded-for": testIp },
-      body: JSON.stringify({ password: TEST_PASS }),
+      body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }),
     });
     assert.equal(blockedRes.status, 429);
     const json = await blockedRes.json();
-    assert.match(json.error, /Слишком много неудачных попыток/);
+    assert.match(json.error, /Слишком много попыток/);
   });
 
   // Дополнительный тест: /logout
   it("маршрут /logout сбрасывает cookie авторизации", async () => {
     const cookie = await getAuthCookie();
-    const res = await fetch(`${baseUrl}/logout`, {
+    const res = await fetch(`${baseUrl}/api/auth/logout`, {
       method: "POST",
       headers: { cookie },
     });
     assert.equal(res.status, 200);
     const setCookie = res.headers.get("set-cookie");
-    assert.ok(setCookie && setCookie.includes("Max-Age=0"));
+    assert.ok(setCookie && setCookie.includes("sid=;") && setCookie.includes("Max-Age=0"));
+    assert.equal((await fetch(`${baseUrl}/api/state`, { headers: { cookie } })).status, 401, "сессия завершена на сервере, а не только в браузере");
   });
 
   // Дополнительный тест: Проверка GitHub (/api/test/github)
@@ -583,7 +592,7 @@ describe("gh-tg-web тесты", () => {
   it("удаление поста из истории и пагинация работают корректно", async () => {
     const cookie = await getAuthCookie();
     const { lastInsertRowid } = testCtx.db
-      .prepare("insert into posts(head,input,text,status) values(?,?,?,?)")
+      .prepare("insert into posts(user_id,head,input,text,status) values(1,?,?,?,?)")
       .run("head-del", "input", "Пост для удаления", "draft");
     const postId = Number(lastInsertRowid);
 
@@ -641,7 +650,7 @@ describe("gh-tg-web тесты", () => {
   // Дополнительный тест: Пустой ответ ИИ и текст длиннее 4096 символов
   it("пустой ответ ИИ или превышение 4096 символов переводят пост в статус failed", async () => {
     const { lastInsertRowid: idEmpty } = testCtx.db
-      .prepare("insert into posts(head,input) values(?,?)")
+      .prepare("insert into posts(user_id,head,input) values(1,?,?)")
       .run("head-empty", "input-empty");
 
     // Пустой ответ на каждом шаге конвейера
@@ -655,7 +664,7 @@ describe("gh-tg-web тесты", () => {
     assert.equal(postEmpty.error, "ИИ вернул пустой ответ");
 
     const { lastInsertRowid: idLong } = testCtx.db
-      .prepare("insert into posts(head,input) values(?,?)")
+      .prepare("insert into posts(user_id,head,input) values(1,?,?)")
       .run("head-long", "input-long");
 
     const hugeText = "А".repeat(5000);
@@ -680,15 +689,15 @@ describe("gh-tg-web тесты", () => {
       const newKey = "different-encryption-key-bbb";
 
       // 1. Создаем базу с первым ключом и сохраняем токен
-      const dbOld = createDatabase(tempDbPath, oldKey);
+      const dbOld = tenantDb(tempDbPath, oldKey);
       dbOld.set("github_token", "ghp_valid_secret_123");
-      const rawOld = dbOld.getRaw("github_token");
+      const rawOld = rawSetting(dbOld, "github_token");
       assert.ok(rawOld.startsWith("enc:v1:"));
       assert.equal(dbOld.get("github_token"), "ghp_valid_secret_123");
       dbOld.db.close();
 
       // 2. Запускаем базу со ВТОРЫМ (изменившимся) ключом
-      const dbNew = createDatabase(tempDbPath, newKey);
+      const dbNew = tenantDb(tempDbPath, newKey);
       // Сервер не должен падать!
       assert.equal(dbNew.get("github_token"), ""); // расшифровать старым ключом нельзя
       assert.equal(dbNew.isSecretCorrupted("github_token"), true);
@@ -705,10 +714,10 @@ describe("gh-tg-web тесты", () => {
       const tempPort = tempServer.address().port;
 
       try {
-        const loginRes = await fetch(`http://127.0.0.1:${tempPort}/login`, {
+        const loginRes = await fetch(`http://127.0.0.1:${tempPort}/api/auth/login`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ password: TEST_PASS }),
+          body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }),
         });
         const cookie = loginRes.headers.get("set-cookie").split(";")[0];
 
@@ -736,74 +745,36 @@ describe("gh-tg-web тесты", () => {
     }
   });
 
-  // 17. Смена пароля администратора через /api/password
-  it("смена пароля администратора через /api/password", async () => {
+  // 17. Смена пароля аккаунта
+  it("смена пароля аккаунта через /api/auth/change-password", async () => {
     const cookie = await getAuthCookie();
+    const change = (c, current, next) =>
+      fetch(`${baseUrl}/api/auth/change-password`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: c },
+        body: JSON.stringify({ current_password: current, new_password: next }),
+      });
 
-    // Ошибка: несовпадение паролей
-    const mismatchRes = await fetch(`${baseUrl}/api/password`, {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({
-        current_password: TEST_PASS,
-        new_password: "new-secret-1234",
-        confirm_password: "different-password",
-      }),
-    });
-    assert.equal(mismatchRes.status, 400);
-
+    // Ошибка: слишком простой новый пароль
+    assert.equal((await change(cookie, TEST_PASSWORD, "short")).status, 400);
     // Ошибка: неверный текущий пароль
-    const wrongCurRes = await fetch(`${baseUrl}/api/password`, {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({
-        current_password: "wrong-current-password",
-        new_password: "new-secret-1234",
-        confirm_password: "new-secret-1234",
-      }),
-    });
-    assert.equal(wrongCurRes.status, 401);
+    assert.equal((await change(cookie, "wrong-current-password", "new-secret-12345")).status, 401);
 
     // Успешная смена пароля
     const NEW_PASS = "brand-new-secret-9999";
-    const okRes = await fetch(`${baseUrl}/api/password`, {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({
-        current_password: TEST_PASS,
-        new_password: NEW_PASS,
-        confirm_password: NEW_PASS,
-      }),
-    });
+    const okRes = await change(cookie, TEST_PASSWORD, NEW_PASS);
     assert.equal(okRes.status, 200);
 
-    // Проверяем вход со старым паролем -> 401
-    const oldLogin = await fetch(`${baseUrl}/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: TEST_PASS }),
-    });
-    assert.equal(oldLogin.status, 401);
-
-    // Проверяем вход с новым паролем -> 200
-    const newLogin = await fetch(`${baseUrl}/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: NEW_PASS }),
-    });
+    // Вход со старым паролем -> 401, с новым -> 200
+    const loginWith = (password) =>
+      fetch(`${baseUrl}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "owner", password }) });
+    assert.equal((await loginWith(TEST_PASSWORD)).status, 401);
+    const newLogin = await loginWith(NEW_PASS);
     assert.equal(newLogin.status, 200);
 
     // Возвращаем пароль назад для последующих тестов
     const newCookie = newLogin.headers.get("set-cookie").split(";")[0];
-    await fetch(`${baseUrl}/api/password`, {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie: newCookie },
-      body: JSON.stringify({
-        current_password: NEW_PASS,
-        new_password: TEST_PASS,
-        confirm_password: TEST_PASS,
-      }),
-    });
+    assert.equal((await change(newCookie, NEW_PASS, TEST_PASSWORD)).status, 200);
   });
 
   // 18. Удаление сообщения из канала через deleteMessage
@@ -811,7 +782,7 @@ describe("gh-tg-web тесты", () => {
     const cookie = await getAuthCookie();
 
     // Создаем отправленный пост с tg_message_id
-    const stmt = testCtx.db.prepare("INSERT INTO posts (status, text, tg_message_id, sent_at) VALUES ('sent', 'Пост для удаления', 777, datetime('now'))");
+    const stmt = testCtx.db.prepare("INSERT INTO posts (user_id, status, text, tg_message_id, sent_at) VALUES (1, 'sent', 'Пост для удаления', 777, datetime('now'))");
     const info = stmt.run();
     const postId = info.lastInsertRowid;
 
@@ -862,11 +833,11 @@ describe("gh-tg-web тесты", () => {
     const cookie = await getAuthCookie();
 
     testCtx.db.prepare("DELETE FROM posts").run();
-    testCtx.db.prepare("INSERT INTO posts (status, text) VALUES ('draft', 'Черновик 1')").run();
-    testCtx.db.prepare("INSERT INTO posts (status, text) VALUES ('draft', 'Черновик 2')").run();
-    testCtx.db.prepare("INSERT INTO posts (status, text) VALUES ('sent', 'Отправленный 1')").run();
-    testCtx.db.prepare("INSERT INTO posts (status, text) VALUES ('failed', 'Ошибка 1')").run();
-    testCtx.db.prepare("INSERT INTO posts (status, text) VALUES ('skipped', 'Пропущен 1')").run();
+    testCtx.db.prepare("INSERT INTO posts (user_id, status, text) VALUES (1, 'draft', 'Черновик 1')").run();
+    testCtx.db.prepare("INSERT INTO posts (user_id, status, text) VALUES (1, 'draft', 'Черновик 2')").run();
+    testCtx.db.prepare("INSERT INTO posts (user_id, status, text) VALUES (1, 'sent', 'Отправленный 1')").run();
+    testCtx.db.prepare("INSERT INTO posts (user_id, status, text) VALUES (1, 'failed', 'Ошибка 1')").run();
+    testCtx.db.prepare("INSERT INTO posts (user_id, status, text) VALUES (1, 'skipped', 'Пропущен 1')").run();
 
     const res = await fetch(`${baseUrl}/api/state?filter=draft`, {
       headers: { cookie },

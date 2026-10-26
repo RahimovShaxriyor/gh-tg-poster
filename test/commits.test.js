@@ -7,6 +7,7 @@ const { createApp } = require("../lib/app");
 const { gh, buildInput, DIFF_BUDGET } = require("../lib/services");
 const { clearCommitsCache, CACHE_TTL_MS } = require("../lib/commits");
 const poster = require("../lib/poster");
+const { TEST_PASSWORD, tenantDb } = require("./helpers/tenant");
 
 const PASS = "commits-test-password";
 const TOKEN = "ghp_SECRETcommitsToken1234567890abcd";
@@ -47,7 +48,7 @@ describe("Вкладка «Коммиты»: сервер", () => {
     const warn = console.warn;
     console.warn = () => {};
     ctx = {
-      ...createDatabase(":memory:", "commits-key"),
+      ...tenantDb(":memory:", "commits-key"),
       ADMIN_PASSWORD: PASS,
       SESSION_SECRET: "s".repeat(40),
       gh,
@@ -73,7 +74,7 @@ describe("Вкладка «Коммиты»: сервер", () => {
     server = http.createServer(createApp(ctx));
     await new Promise((r) => server.listen(0, r));
     base = `http://127.0.0.1:${server.address().port}`;
-    const l = await originalFetch(`${base}/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: PASS }) });
+    const l = await originalFetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }) });
     cookie = l.headers.get("set-cookie").split(";")[0];
   });
 
@@ -112,7 +113,7 @@ describe("Вкладка «Коммиты»: сервер", () => {
       json([commit(sha("a"), "feat: экспорт\n\nподробности"), commit(sha("b"), "Merge branch x", { parents: 2 }), commit(sha("c"), "fix: поиск", { login: null })], 200, {
         link: `<https://api.github.com/repositories/1/commits?page=3>; rel="next", <https://api.github.com/repositories/1/commits?page=9>; rel="last"`,
       });
-    ctx.db.prepare("insert into posts(id,head,input,status,text) values(7,'x','i','sent','t')").run();
+    ctx.db.prepare("insert into posts(user_id,id,head,input,status,text) values(1,7,'x','i','sent','t')").run();
     ctx.recordPostCommits(7, [sha("a")]);
 
     const res = await get("/api/commits?branch=dev&author=anna&since=2026-10-01&until=2026-10-20&page=2");
@@ -340,7 +341,7 @@ describe("Вкладка «Коммиты»: сервер", () => {
   });
 
   it("уже использованные коммиты: 409 со списком постов, повтор с подтверждением создаёт пост", async () => {
-    ctx.db.prepare("insert into posts(id,head,input,status,text) values(3,'x','i','sent','t')").run();
+    ctx.db.prepare("insert into posts(user_id,id,head,input,status,text) values(1,3,'x','i','sent','t')").run();
     ctx.recordPostCommits(3, [sha("a")]);
     handler = commitDetails;
     const first = await post("/api/posts/from-commits", { shas: [sha("a"), sha("b")] });

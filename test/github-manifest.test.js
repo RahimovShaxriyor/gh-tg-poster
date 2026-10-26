@@ -6,6 +6,7 @@ const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const { appCredentials, appManifest, clearInstallationTokenCache, consumeState } = require("../lib/github-app");
 const { publicBaseUrl } = require("../lib/notify");
+const { TEST_PASSWORD, tenantDb } = require("./helpers/tenant");
 
 const PASS = "manifest-test-password";
 const BASE = "https://poster.example.org";
@@ -21,23 +22,26 @@ const quietDb = (key) => {
   const warn = console.warn;
   console.warn = () => {};
   try {
-    return createDatabase(":memory:", key);
+    return tenantDb(":memory:", key);
   } finally {
     console.warn = warn;
   }
 };
 
+// Значение настройки аккаунта как оно лежит в базе (секреты — зашифрованными)
+const rawSetting = (ctx, k) => ctx.db.prepare("select v from user_settings where user_id=? and k=?").get(ctx.userId, k)?.v;
+
 async function startServer(ctx) {
   const server = http.createServer(createApp(ctx));
   await new Promise((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const login = await fetch(`${base}/login`, {
+  const login = await fetch(`${base}/api/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ password: PASS }),
+    body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }),
   });
   const cookie = login.headers.get("set-cookie").split(";")[0];
-  return { server, base, cookie, session: cookie.slice(2) };
+  return { server, base, cookie, session: cookie.slice(cookie.indexOf("=") + 1) };
 }
 
 describe("Подключение GitHub в одну кнопку (App Manifest)", () => {
@@ -192,7 +196,7 @@ describe("Подключение GitHub в одну кнопку (App Manifest)"
     assert.equal(ctx.get("github_app_id"), "424242");
     assert.equal(ctx.get("github_app_slug"), "gh-tg-poster-ab12cd");
     assert.equal(ctx.get("github_app_base_url"), BASE);
-    assert.ok(ctx.getRaw("github_app_pem").startsWith("enc:v1:"), "ключ в базе зашифрован");
+    assert.ok(rawSetting(ctx, "github_app_pem").startsWith("enc:v1:"), "ключ в базе зашифрован");
     assert.equal(ctx.get("github_app_pem"), PEM);
     assert.equal(ctx.get("github_installation_id"), "", "старая установка забыта");
     const allValues = ctx.db.prepare("select v from kv").all().map((r) => r.v).join("\n");
@@ -208,7 +212,7 @@ describe("Подключение GitHub в одну кнопку (App Manifest)"
     // Ключ не уходит через API
     const stateJson = await (await fetch(srv.base + "/api/state", { headers: { cookie: srv.cookie } })).text();
     assert.equal(stateJson.includes("PRIVATE KEY"), false);
-    assert.equal(stateJson.includes(ctx.getRaw("github_app_pem")), false);
+    assert.equal(stateJson.includes(rawSetting(ctx, "github_app_pem")), false);
     const data = JSON.parse(stateJson);
     assert.equal(data.github_app_configured, true);
     assert.equal(data.github_app_slug, "gh-tg-poster-ab12cd");
@@ -222,10 +226,10 @@ describe("Подключение GitHub в одну кнопку (App Manifest)"
     assert.equal(bad.hash, "#settings/github");
 
     const state = await createState();
-    const other = await fetch(`${srv.base}/login`, {
+    const other = await fetch(`${srv.base}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: PASS }),
+      body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }),
     });
     // Другая сессия (другая cookie) не может воспользоваться чужим state
     await new Promise((r) => setTimeout(r, 5));

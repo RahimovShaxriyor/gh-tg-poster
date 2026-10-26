@@ -4,6 +4,7 @@ const http = require("node:http");
 const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const services = require("../lib/services");
+const { TEST_PASSWORD, tenantDb, channelAdmin } = require("./helpers/tenant");
 
 // Публикация из панели: POST /api/posts/:id/publish. Telegram везде подменён, реальных отправок нет.
 describe("Публикация из панели: статусы HTTP и защита от дублей", () => {
@@ -15,23 +16,24 @@ describe("Публикация из панели: статусы HTTP и защ�
   let cookie;
   let calls;
   let reply;
+  const tgMock = async (method, body, token) => {
+    calls.push({ method, body, token });
+    return reply(method, body);
+  };
 
   before(async () => {
     const { warn } = console;
     console.warn = () => {};
-    ctx = { ...createDatabase(":memory:", "k"), ADMIN_PASSWORD: PASS, SESSION_SECRET: "s".repeat(40), TG_BOT_TOKEN: TOKEN };
+    ctx = { ...tenantDb(":memory:", "k"), ADMIN_PASSWORD: PASS, SESSION_SECRET: "s".repeat(40), TG_BOT_TOKEN: TOKEN };
     console.warn = warn;
-    ctx.tg = async (method, body, token) => {
-      calls.push({ method, body, token });
-      return reply(method, body);
-    };
+    ctx.tg = channelAdmin(tgMock);
     server = http.createServer(createApp(ctx));
     await new Promise((r) => server.listen(0, r));
     base = `http://127.0.0.1:${server.address().port}`;
-    const res = await fetch(`${base}/login`, {
+    const res = await fetch(`${base}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ password: PASS }),
+      body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }),
     });
     cookie = res.headers.get("set-cookie").split(";")[0];
   });
@@ -42,10 +44,11 @@ describe("Публикация из панели: статусы HTTP и защ�
     reply = () => ({ ok: true, result: { message_id: 77 } });
     ctx.TG_BOT_TOKEN = TOKEN;
     ctx.set("channel_id", "@chan");
+    ctx.set("tg_owner_chat_id", "555");
   });
 
   const addPost = (status = "draft", text = "Новый пост") =>
-    Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','i',?,?)").run(text, status).lastInsertRowid);
+    Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status) values(1,'h','i',?,?)").run(text, status).lastInsertRowid);
 
   const publish = async (id, body = {}) => {
     const res = await fetch(`${base}/api/posts/${id}/publish`, {
@@ -201,7 +204,7 @@ describe("Публикация из панели: статусы HTTP и защ�
     const realFetch = global.fetch;
     const tg = ctx.tg;
     // Настоящий клиент services.tg, подменён только сетевой запрос к api.telegram.org
-    ctx.tg = (m, b, t) => services.tg(m, b, t);
+    ctx.tg = channelAdmin((m, b, t) => services.tg(m, b, t));
     try {
       for (const [error, status, code] of [
         [Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }), 504, "TELEGRAM_TIMEOUT"],
@@ -277,15 +280,19 @@ describe("Публикация из панели: статусы HTTP и защ�
   });
 
   it("непредвиденная ошибка сервера — 500 INTERNAL_ERROR, а не 400", async () => {
-    const post = ctx.post;
-    ctx.post = () => { throw new Error("сбой чтения"); };
+    // Сбой чтения поста из базы: данные аккаунта в запросе берутся из базы, поэтому сбой — на её уровне
+    const prepare = ctx.db.prepare;
+    ctx.db.prepare = function (sql) {
+      if (sql === "select * from posts where id=? and user_id=?") throw new Error("сбой чтения");
+      return prepare.call(this, sql);
+    };
     const { error } = console;
     console.error = () => {};
     let r;
     try {
       r = await publish(1);
     } finally {
-      ctx.post = post;
+      ctx.db.prepare = prepare;
       console.error = error;
     }
     assertError(r, 500, "INTERNAL_ERROR");
@@ -297,15 +304,42 @@ describe("Публикация из панели: статусы HTTP и защ�
     assert.equal((await res.json()).code, "INVALID_REQUEST");
   });
 
-  it("канал в настройках: @имя и числовой ID принимаются, ссылка и имя без @ — 400", async () => {
-    const save = (channel_id) =>
-      fetch(`${base}/api/settings`, { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ channel_id }) });
-    for (const ok of ["@my_channel", "-1001234567890", ""]) {
-      assert.equal((await save(ok)).status, 200, ok);
-      assert.equal(ctx.get("channel_id"), ok);
-    }
+  it("канал в настройках: формат проверяется, подключить можно только свой канал после привязки Telegram", async () => {
+    const save = async (channel_id) => {
+      const res = await fetch(`${base}/api/settings`, { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ channel_id }) });
+      return { status: res.status, body: await res.json() };
+    };
     for (const bad of ["https://t.me/my_channel", "t.me/my_channel", "my_channel", "@a b"]) {
       assert.equal((await save(bad)).status, 400, bad);
     }
+    // Здесь права в канале проверяются по ответам мока, без обёртки «администратор»
+    ctx.tg = tgMock;
+    ctx.set("channel_id", "");
+    ctx.set("tg_owner_chat_id", "");
+    const r1 = await save("@my_channel");
+    assert.equal(r1.status, 409);
+    assert.equal(r1.body.code, "TELEGRAM_NOT_LINKED");
+
+    ctx.set("tg_owner_chat_id", "555");
+    let memberStatus = "member";
+    reply = (method) => {
+      if (method === "getChat") return { ok: true, result: { id: -1001234567890, type: "channel", title: "Мой канал", username: "my_channel" } };
+      if (method === "getChatMember") return { ok: true, result: { status: memberStatus, can_post_messages: true } };
+      return { ok: true, result: { message_id: 1 } };
+    };
+    const r2 = await save("@my_channel");
+    assert.equal(r2.status, 403, "привязанный Telegram — не администратор канала");
+    assert.equal(r2.body.code, "TELEGRAM_CHANNEL_NOT_OWNED");
+    assert.equal(ctx.get("channel_id"), "");
+
+    memberStatus = "administrator";
+    assert.equal((await save("@my_channel")).status, 200);
+    assert.equal(ctx.get("channel_id"), "-1001234567890", "в базе — числовой id канала");
+    assert.equal(ctx.get("channel_username"), "@my_channel");
+    assert.equal(calls.find((c) => c.method === "getChatMember").body.user_id, 555, "права проверяются у привязанного Telegram аккаунта");
+
+    assert.equal((await save("")).status, 200);
+    assert.equal(ctx.get("channel_id"), "");
+    ctx.tg = channelAdmin(tgMock);
   });
 });

@@ -10,7 +10,8 @@ const { createApp } = require("../lib/app");
 const { encrypt } = require("../lib/crypto");
 const { botToken } = require("../lib/notify");
 const { publish } = require("../lib/poster");
-const { handleUpdate, createOwnerCode, OWNER_CODE_TTL_MS } = require("../lib/telegram-bot");
+const { handleUpdate, OWNER_CODE_TTL_MS } = require("../lib/telegram-bot");
+const { TEST_PASSWORD, tenantDb, ADMIN_MEMBER } = require("./helpers/tenant");
 
 const PASS = "tg-token-test-password";
 const ENV_TOKEN = "111111:ENV-token-AAAAAAAAAAAAAAAAAAAAAAA";
@@ -21,7 +22,7 @@ function quietDb() {
   const warn = console.warn;
   console.warn = () => {};
   try {
-    return createDatabase(":memory:", KEY);
+    return tenantDb(":memory:", KEY);
   } finally {
     console.warn = warn;
   }
@@ -37,7 +38,8 @@ describe("Токен бота из TG_BOT_TOKEN", () => {
 
   beforeEach(async () => {
     calls = [];
-    tgReply = (method) => (method === "getMe" ? { ok: true, result: { id: 777, username: "ForTestBot" } } : { ok: true, result: { message_id: 1 } });
+    tgReply = (method) =>
+      method === "getMe" ? { ok: true, result: { id: 777, username: "ForTestBot" } } : method === "getChatMember" ? ADMIN_MEMBER : { ok: true, result: { message_id: 1 } };
     ctx = {
       ...quietDb(),
       ADMIN_PASSWORD: PASS,
@@ -52,7 +54,7 @@ describe("Токен бота из TG_BOT_TOKEN", () => {
     server = http.createServer(createApp(ctx));
     await new Promise((r) => server.listen(0, r));
     base = `http://127.0.0.1:${server.address().port}`;
-    const login = await fetch(`${base}/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: PASS }) });
+    const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }) });
     cookie = login.headers.get("set-cookie").split(";")[0];
   });
 
@@ -61,6 +63,8 @@ describe("Токен бота из TG_BOT_TOKEN", () => {
   const post = (p, body) =>
     fetch(base + p, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify(body || {}) });
   const state = async () => (await fetch(base + "/api/state", { headers: { cookie } })).text();
+  // Код привязки выдаёт платформа для аккаунта; старый токен бота лежит в хранилище платформы (kv)
+  const createOwnerCode = (c, ttl = OWNER_CODE_TTL_MS) => c.platform.createTgLinkCode(c.userId, ttl);
 
   it("сервер стартует без TG_BOT_TOKEN: панель работает, в Telegram ничего не уходит", async () => {
     const work = fs.mkdtempSync(path.join(os.tmpdir(), "gtw-notg-"));
@@ -75,7 +79,8 @@ describe("Токен бота из TG_BOT_TOKEN", () => {
         return new Response("[]", { status: 200 });
       };`);
     const port = 3970 + Math.floor(Math.random() * 9);
-    const env = { ...process.env, PORT: String(port), ADMIN_PASSWORD: PASS, SESSION_SECRET: "s".repeat(40), ENCRYPTION_KEY: KEY };
+    const env = { ...process.env, PORT: String(port), SESSION_SECRET: "s".repeat(40), ENCRYPTION_KEY: KEY };
+    delete env.ADMIN_PASSWORD;
     delete env.TG_BOT_TOKEN;
     const child = spawn(process.execPath, ["-r", path.join(work, "stub.js"), path.join(__dirname, "..", "server.js")], { cwd: work, env });
     let output = "";
@@ -88,7 +93,8 @@ describe("Токен бота из TG_BOT_TOKEN", () => {
         health = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.status).catch(() => null);
       }
       assert.equal(health, 200);
-      const l = await fetch(`http://127.0.0.1:${port}/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: PASS }) });
+      const l = await fetch(`http://127.0.0.1:${port}/api/auth/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "first-user", password: TEST_PASSWORD }) });
+      assert.equal(l.status, 201);
       const st = await (await fetch(`http://127.0.0.1:${port}/api/state`, { headers: { cookie: l.headers.get("set-cookie").split(";")[0] } })).json();
       assert.equal(st.telegram.configured, false);
       await new Promise((r) => setTimeout(r, 1500));
@@ -102,43 +108,47 @@ describe("Токен бота из TG_BOT_TOKEN", () => {
   });
 
   it("/api/state не содержит ни токена из env, ни старого токена из базы", async () => {
-    ctx.setRaw("tg_token", encrypt(LEGACY_TOKEN, KEY));
+    ctx.platform.setRaw("tg_token", encrypt(LEGACY_TOKEN, KEY));
     await post("/api/test/telegram");
     const text = await state();
     for (const secret of [ENV_TOKEN, LEGACY_TOKEN, ENV_TOKEN.split(":")[1], LEGACY_TOKEN.split(":")[1]]) {
       assert.equal(text.includes(secret), false, secret);
     }
     const t = JSON.parse(text).telegram;
-    assert.deepEqual([t.configured, t.source, t.username, t.legacy_token], [true, "env", "ForTestBot", true]);
+    // Наличие старого токена в базе пользователям не показывается: токеном управляет администратор сервера
+    assert.deepEqual([t.configured, t.source, t.username, t.legacy_token], [true, "env", "ForTestBot", false]);
   });
 
   it("токен бота нельзя записать через настройки", async () => {
     await post("/api/settings", { tg_token: LEGACY_TOKEN });
-    assert.equal(ctx.getRaw("tg_token"), undefined);
+    assert.equal(ctx.platform.getRaw("tg_token"), undefined);
   });
 
-  it("миграция: без TG_BOT_TOKEN работает старый токен из базы, по кнопке он удаляется", async () => {
+  it("миграция: без TG_BOT_TOKEN работает старый токен из базы; пользователь панели удалить его не может", async () => {
     ctx.TG_BOT_TOKEN = "";
-    ctx.setRaw("tg_token", encrypt(LEGACY_TOKEN, KEY)); // так его хранила прежняя версия
+    ctx.platform.setRaw("tg_token", encrypt(LEGACY_TOKEN, KEY)); // так его хранила прежняя версия
     ctx.set("channel_id", "@chan");
-    const id = Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','i','Текст','draft')").run().lastInsertRowid);
+    ctx.set("tg_owner_chat_id", "500");
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status) values(1,'h','i','Текст','draft')").run().lastInsertRowid);
 
     let t = JSON.parse(await state()).telegram;
-    assert.deepEqual([t.configured, t.source, t.legacy_token], [true, "legacy", true]);
+    assert.deepEqual([t.configured, t.source, t.legacy_token], [true, "legacy", false]);
     await publish(id, null, ctx);
     assert.equal(calls.find((c) => c.method === "sendMessage").token, LEGACY_TOKEN);
 
-    const res = await (await post("/api/telegram/legacy-token/delete")).json();
-    assert.match(res.message, /удалён/);
-    assert.equal(ctx.getRaw("tg_token"), undefined);
+    // Токен — общий для платформы: на публичном сайте любой пользователь иначе выключил бы бот всем
+    const res = await post("/api/telegram/legacy-token/delete");
+    assert.equal(res.status, 404);
+    assert.ok(ctx.platform.getRaw("tg_token"));
     t = JSON.parse(await state()).telegram;
-    assert.deepEqual([t.configured, t.source, t.legacy_token], [false, "", false]);
+    assert.deepEqual([t.configured, t.source, t.legacy_token], [true, "legacy", false]);
   });
 
   it("миграция: при заданном TG_BOT_TOKEN старое значение из базы игнорируется", async () => {
-    ctx.setRaw("tg_token", LEGACY_TOKEN); // и открытым текстом тоже
+    ctx.platform.setRaw("tg_token", LEGACY_TOKEN); // и открытым текстом тоже
     ctx.set("channel_id", "@chan");
-    const id = Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','i','Текст','draft')").run().lastInsertRowid);
+    ctx.set("tg_owner_chat_id", "500");
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status) values(1,'h','i','Текст','draft')").run().lastInsertRowid);
     await publish(id, null, ctx);
     assert.equal(calls.find((c) => c.method === "sendMessage").token, ENV_TOKEN);
     assert.equal(botToken(ctx), ENV_TOKEN);
@@ -147,7 +157,7 @@ describe("Токен бота из TG_BOT_TOKEN", () => {
   it("без токена публикация отказывает и не трогает пост", async () => {
     ctx.TG_BOT_TOKEN = "";
     ctx.set("channel_id", "@chan");
-    const id = Number(ctx.db.prepare("insert into posts(head,input,text,status) values('h','i','Текст','draft')").run().lastInsertRowid);
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,text,status) values(1,'h','i','Текст','draft')").run().lastInsertRowid);
     await assert.rejects(() => publish(id, null, ctx), /Бот не настроен: задайте TG_BOT_TOKEN/);
     assert.equal(ctx.post(id).status, "draft");
     assert.equal(ctx.post(id).interrupted, 0);
@@ -216,7 +226,7 @@ describe("Токен бота из TG_BOT_TOKEN", () => {
       const { code } = createOwnerCode(ctx);
       await start(500, `/start ${code}`);
       assert.equal(ctx.get("tg_owner_chat_id"), "500");
-      assert.match(calls.find((c) => c.method === "sendMessage").body.text, /привязаны как владелец/);
+      assert.match(calls.find((c) => c.method === "sendMessage").body.text, /Telegram привязан к аккаунту owner/);
 
       calls = [];
       await start(600, `/start ${code}`);
@@ -228,8 +238,7 @@ describe("Токен бота из TG_BOT_TOKEN", () => {
     });
 
     it("просроченный код не принимается", async () => {
-      const { code } = createOwnerCode(ctx);
-      ctx.set("tg_owner_code_exp", String(Date.now() - 1));
+      const { code } = createOwnerCode(ctx, -1);
       await start(500, `/start ${code}`);
       assert.equal(ctx.get("tg_owner_chat_id"), "");
     });

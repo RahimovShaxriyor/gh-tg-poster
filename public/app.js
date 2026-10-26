@@ -115,7 +115,10 @@
     selectedId: null,
     loginVisible: false,
     checking: false,
-    drafts: store.get("gtw.drafts", {}), // несохранённые правки: id -> текст
+    drafts: {}, // несохранённые правки: id -> текст (в браузере — отдельно для каждого аккаунта)
+    username: "", // текущий аккаунт
+    csrf: "", // токен для изменяющих запросов, привязан к сессии
+    authMode: "login", // форма: вход или регистрация
     saveState: {}, // id -> saving | saved | error
     saveTimers: {},
     dirty: new Set(), // разделы настроек с несохранёнными изменениями
@@ -140,7 +143,11 @@
 
   const allPosts = () => [...S.posts, ...S.extra];
   const findPost = (id) => allPosts().find((p) => p.id === id);
-  const persistDrafts = () => store.set("gtw.drafts", S.drafts);
+  // Черновики в браузере хранятся под именем аккаунта: при смене аккаунта чужие правки не появятся
+  const draftsKey = () => "gtw.drafts:" + S.username.toLowerCase();
+  const persistDrafts = () => {
+    if (S.username) store.set(draftsKey(), S.drafts);
+  };
 
   // ===== Запросы =====
   class ApiError extends Error {
@@ -151,25 +158,57 @@
     }
   }
 
-  async function api(path, { method = "GET", body } = {}) {
+  async function api(path, { method = "GET", body } = {}, retried = false) {
     const opts = { method, headers: {} };
     if (body !== undefined) {
       opts.headers["content-type"] = "application/json";
       opts.body = JSON.stringify(body);
     }
+    // Изменяющие запросы — только с CSRF-токеном своей сессии
+    if (method !== "GET" && S.csrf) opts.headers["x-csrf-token"] = S.csrf;
     let res;
     try {
       res = await fetch(path, opts);
     } catch {
       throw new ApiError("Нет связи с сервером. Проверьте интернет и повторите.", 0);
     }
-    if (res.status === 401 && path !== "/login") {
+    const isAuthCall = path === "/api/auth/login" || path === "/api/auth/register";
+    if (res.status === 401 && !isAuthCall) {
       showLogin(true);
       throw new ApiError("Сессия истекла. Войдите снова, затем повторите действие.", 401);
     }
     const data = await res.json().catch(() => ({}));
+    // Токен устарел (например, пароль сменили в другой вкладке): берём новый и повторяем один раз
+    if (res.status === 403 && data.code === "CSRF_FAILED" && !retried && (await refreshSession())) {
+      return api(path, { method, body }, true);
+    }
     if (!res.ok) throw new ApiError(data.error || `Ошибка сервера (${res.status})`, res.status, data);
     return data;
+  }
+
+  // Текущий аккаунт и CSRF-токен. При смене аккаунта в этой вкладке страница перезагружается,
+  // чтобы в памяти не осталось чужих постов, настроек и черновиков
+  function applySession(username, csrf) {
+    if (S.username && username && S.username.toLowerCase() !== username.toLowerCase()) {
+      location.reload();
+      return false;
+    }
+    S.csrf = csrf || "";
+    if (!S.username) {
+      S.username = username;
+      S.drafts = store.get(draftsKey(), {});
+    }
+    $("#topbar-user").textContent = S.username;
+    return true;
+  }
+
+  async function refreshSession() {
+    try {
+      const me = await api("/api/auth/me");
+      return applySession(me.username, me.csrf);
+    } catch {
+      return false;
+    }
   }
 
   /** Кнопка блокируется на время запроса, повторный клик игнорируется */
@@ -215,19 +254,33 @@
     });
   }
 
-  // ===== Вход и потеря сессии =====
+  // ===== Вход, регистрация и потеря сессии =====
+  function setAuthMode(mode) {
+    S.authMode = mode;
+    const reg = mode === "register";
+    $("#login-title").textContent = reg ? "Регистрация" : "Вход";
+    $("#login-submit").textContent = reg ? "Создать аккаунт" : "Войти";
+    $("#login-switch-text").textContent = reg ? "Уже есть аккаунт?" : "Нет аккаунта?";
+    $("#login-switch").textContent = reg ? "Войти" : "Зарегистрироваться";
+    $("#pw").setAttribute("autocomplete", reg ? "new-password" : "current-password");
+    $("#login-hint").hidden = !reg;
+    $("#login-error").hidden = true;
+  }
+
   function showLogin(expired) {
     stopPolling();
-    $("#login-note").textContent = expired
+    $("#login-note").textContent = expired && S.username
       ? "Сессия истекла. Войдите снова: введённый текст сохранён и вернётся на место."
-      : "Введите пароль администратора.";
-    if (S.loginVisible) return; // не трогаем поле, если человек уже вводит пароль
+      : "Анонсы из коммитов GitHub в ваш Telegram-канал.";
+    if (S.loginVisible) return; // не трогаем поля, если человек уже вводит пароль
     S.loginVisible = true;
+    setAuthMode(expired && S.username ? "login" : S.authMode);
     $("#login").hidden = false;
     $("#app").setAttribute("aria-hidden", "true");
     $("#login-error").hidden = true;
     $("#pw").value = "";
-    $("#pw").focus();
+    if (S.username) $("#login-username").value = S.username;
+    ($("#login-username").value ? $("#pw") : $("#login-username")).focus();
   }
 
   function hideLogin() {
@@ -238,33 +291,47 @@
 
   async function onLogin(e) {
     e.preventDefault();
+    const user = $("#login-username");
     const pw = $("#pw");
     const errEl = $("#login-error");
-    if (!pw.value) {
-      errEl.textContent = "Введите пароль.";
+    const reg = S.authMode === "register";
+    const showError = (text) => {
+      errEl.textContent = text;
       errEl.hidden = false;
-      return;
-    }
+    };
+    if (!user.value.trim()) return showError("Введите имя пользователя.");
+    if (!pw.value) return showError("Введите пароль.");
+    if (reg && pw.value.length < 10) return showError("Пароль — не короче 10 символов.");
     await busy($("#login-submit"), async () => {
       try {
-        await api("/login", { method: "POST", body: { password: pw.value } });
+        const r = await api(reg ? "/api/auth/register" : "/api/auth/login", { method: "POST", body: { username: user.value.trim(), password: pw.value } });
         pw.value = "";
+        if (!applySession(r.username, r.csrf)) return;
         hideLogin();
         await loadState();
         flushSaves();
+        if (reg) location.hash = "#posts";
       } catch (err) {
-        errEl.textContent = err.status === 401 ? "Неверный пароль." : err.message;
-        errEl.hidden = false;
+        showError(err.message);
         pw.select();
       }
     });
   }
 
+  // Выход: сессия завершается на сервере, а из браузера убираются черновики этого аккаунта.
+  // Перезагрузка страницы очищает всё, что было в памяти (посты, настройки, кэши)
   async function onLogout() {
     try {
-      await api("/logout", { method: "POST" });
+      await api("/api/auth/logout", { method: "POST" });
     } catch {}
-    showLogin(false);
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("gtw.")) localStorage.removeItem(key);
+      }
+    } catch {}
+    location.replace("/#posts");
+    location.reload();
   }
 
   // ===== Загрузка состояния и опрос =====
@@ -273,6 +340,7 @@
     const query = new URLSearchParams({ limit, offset: 0, filter: S.filter, tzo: new Date().getTimezoneOffset() });
     try {
       const data = await api("/api/state?" + query);
+      if (data.user?.username && !applySession(data.user.username, S.csrf)) return;
       hideLogin();
       S.settings = data.settings || {};
       S.status = data.status || {};
@@ -431,12 +499,12 @@
     if (kind === "telegram") {
       const t = S.meta.telegram || {};
       const bot = t.username ? "@" + t.username : "Бот";
-      if (!t.configured) return { state: "is-error", title: "Бот не настроен", text: "Задайте TG_BOT_TOKEN в .env и перезапустите сервер." };
+      if (!t.configured) return { state: "is-error", title: "Бот не настроен", text: "Публикация в Telegram недоступна, пока администратор сервера не задаст токен бота." };
       if (t.error) return { state: "is-error", title: "Telegram не принимает токен", text: t.error };
-      if (t.source === "legacy") return { state: "is-warn", title: `${bot}: старый токен из базы`, text: "Добавьте TG_BOT_TOKEN в .env и удалите старое значение в настройках." };
+      if (t.source === "legacy") return { state: "is-warn", title: `${bot}: старый токен из базы`, text: "Бот работает со старым токеном. Администратору сервера: задайте TG_BOT_TOKEN в .env." };
       if (!s.channel_id) return { state: "is-warn", title: `${bot}: канал не выбран`, text: `Добавьте ${bot} администратором канала с правом публикации или впишите @канал в настройках.` };
       if (!s.tg_owner_chat_id) {
-        return { state: "is-warn", title: `Канал ${s.channel_id}`, text: "Вы не привязаны как владелец: черновики в личку и команды /check, /status не работают." };
+        return { state: "is-warn", title: `Канал ${s.channel_id}`, text: "Ваш Telegram не привязан: черновики в личку и команды /check, /status не работают." };
       }
       return { state: "is-ok", title: `Канал ${s.channel_id}`, text: `Владелец: ${s.tg_owner_username || s.tg_owner_chat_id}. В личке работают /check и /status.` };
     }
@@ -623,10 +691,10 @@
   function setupSteps() {
     const s = S.settings;
     return [
-      { done: S.meta.hasGithub && !!s.repo, text: "GitHub и репозиторий", section: "github" },
-      { done: !!S.meta.telegram?.configured && !!s.channel_id, text: "Бот и канал в Telegram", section: "telegram" },
-      { done: s.ai_key_set && !!s.ai_model, text: "Ключ и модель ИИ", section: "ai" },
-      { done: !!s.tg_owner_chat_id, text: "Привязка владельца к боту", section: "telegram" },
+      { done: S.meta.hasGithub && !!s.repo, text: "Подключить GitHub и выбрать репозиторий", section: "github" },
+      { done: !!s.tg_owner_chat_id && !!s.channel_id, text: "Привязать Telegram и свой канал", section: "telegram" },
+      { done: s.ai_key_set && !!s.ai_model, text: "Указать свой ключ и модель ИИ", section: "ai" },
+      { done: (S.counts.all || 0) > 0, text: "Создать первый пост из коммитов", href: "#commits" },
     ];
   }
 
@@ -645,7 +713,7 @@
         h("p", { class: "empty-text" }, "После этого панель начнёт следить за коммитами и готовить черновики."),
         h("ol", { class: "setup-list" }, steps.map((st) => h("li", { class: st.done ? "is-done" : "" },
           h("span", {}, st.text),
-          st.done ? null : h("a", { class: "btn btn-secondary btn-sm", href: `#settings/${st.section}` }, "Настроить")))),
+          st.done ? null : h("a", { class: "btn btn-secondary btn-sm", href: st.href || `#settings/${st.section}` }, st.href ? "Открыть" : "Настроить")))),
       ];
     }
     return [
@@ -1316,12 +1384,13 @@
     if (!text) return toast("Текст пустой: напишите пост или попросите другой вариант.", "error");
     const full = withFooter(p, text).length;
     if (full > 4096) return toast(`Текст с подписью длиннее 4096 символов на ${full - 4096}. Сократите его.`, "error");
+    if (!(await confirmResend(p))) return;
     const confirmUnverified = await confirmReview(p);
     if (confirmUnverified === null) return;
     clearTimeout(S.saveTimers[p.id]);
     await busy(btn, async () => {
       try {
-        await api(`/api/posts/${p.id}/publish`, { method: "POST", body: { text, confirm_unverified: confirmUnverified } });
+        await api(`/api/posts/${p.id}/publish`, { method: "POST", body: { text, confirm_unverified: confirmUnverified, confirm_resend: p.status === "failed" && !!p.interrupted } });
         delete S.drafts[p.id];
         persistDrafts();
         toast("Опубликовано в канал.");
@@ -1346,21 +1415,23 @@
     return ok ? true : null;
   }
 
+  // Прошлая отправка прервалась: пост мог уже дойти. Сервер без подтверждения повторно не отправит
+  const confirmResend = (p) =>
+    !(p.status === "failed" && p.interrupted) ||
+    confirmDialog({
+      title: "Отправить ещё раз?",
+      text: "Прошлая отправка прервалась, и пост мог уже появиться в канале. Отправляйте, только если в канале его нет.",
+      ok: "Отправить",
+      danger: false,
+    });
+
   async function doRetry(p, btn) {
-    if (p.interrupted) {
-      const ok = await confirmDialog({
-        title: "Отправить ещё раз?",
-        text: "Прошлая отправка прервалась, и пост мог уже появиться в канале. Отправляйте, только если в канале его нет.",
-        ok: "Отправить",
-        danger: false,
-      });
-      if (!ok) return;
-    }
+    if (!(await confirmResend(p))) return;
     const confirmUnverified = await confirmReview(p);
     if (confirmUnverified === null) return;
     await busy(btn, async () => {
       try {
-        await api(`/api/posts/${p.id}/publish`, { method: "POST", body: { confirm_unverified: confirmUnverified } });
+        await api(`/api/posts/${p.id}/publish`, { method: "POST", body: { confirm_unverified: confirmUnverified, confirm_resend: !!p.interrupted } });
         toast("Опубликовано в канал.");
       } catch (err) {
         fail(err);
@@ -1548,11 +1619,11 @@
     let status;
     let hint = "";
     if (!t.configured) {
-      status = "Бот не настроен: задайте TG_BOT_TOKEN в .env и перезапустите сервер.";
+      status = "Бот платформы не настроен: публикация в Telegram недоступна, пока администратор сервера не задаст токен бота.";
       hint = "Токен выдаёт @BotFather командой /newbot.";
     } else if (t.error) {
       status = t.error;
-      hint = "Проверьте TG_BOT_TOKEN в .env и перезапустите сервер.";
+      hint = "Сообщите администратору сервера: Telegram не принял токен бота (TG_BOT_TOKEN).";
     } else if (bot) {
       status = `Бот ${bot} подключён.`;
       hint = `Добавьте ${bot} администратором канала с правом публикации.`;
@@ -1562,10 +1633,6 @@
     $("#tg-bot-status").textContent = status;
     $("#tg-bot-hint").textContent = hint;
     $("#tg-bot-hint").hidden = !hint;
-    $("#tg-legacy").hidden = !t.legacy_token;
-    $("#tg-legacy-text").textContent = t.source === "legacy"
-      ? "Пока TG_BOT_TOKEN не задан, бот работает со старым токеном из базы."
-      : "TG_BOT_TOKEN задан, старое значение из базы не используется.";
     $("#btn-test-post").disabled = !t.configured;
   }
 
@@ -1892,11 +1959,12 @@
     const next = $("#new_password").value;
     const again = $("#confirm_password").value;
     if (!cur || !next) return toast("Заполните текущий и новый пароль.", "error");
-    if (next.length < 6) return toast("Новый пароль должен быть не короче 6 символов.", "error");
+    if (next.length < 10) return toast("Новый пароль должен быть не короче 10 символов.", "error");
     if (next !== again) return toast("Новые пароли не совпадают.", "error");
     return busy(btn, async () => {
       try {
-        await api("/api/password", { method: "POST", body: { current_password: cur, new_password: next, confirm_password: again } });
+        const r = await api("/api/auth/change-password", { method: "POST", body: { current_password: cur, new_password: next } });
+        S.csrf = r.csrf || S.csrf;
         for (const id of ["current_password", "new_password", "confirm_password"]) $("#" + id).value = "";
         S.dirty.delete("security");
         toast("Пароль изменён. Остальные сессии завершены.");
@@ -1996,32 +2064,10 @@
       box.hidden = false;
     }));
 
-    $("#btn-tg-legacy-delete").addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      const usingLegacy = S.meta.telegram?.source === "legacy";
-      const ok = await confirmDialog({
-        title: "Удалить старый токен бота из базы?",
-        text: usingLegacy
-          ? "Сейчас бот работает именно с ним: после удаления бот выключится, пока вы не зададите TG_BOT_TOKEN в .env и не перезапустите сервер."
-          : "Бот работает с TG_BOT_TOKEN из .env, старое значение больше не нужно.",
-        ok: "Удалить",
-      });
-      if (!ok) return;
-      await busy(btn, async () => {
-        try {
-          const res = await api("/api/telegram/legacy-token/delete", { method: "POST" });
-          toast(res.message);
-          await loadState();
-        } catch (err) {
-          fail(err);
-        }
-      });
-    });
-
     $("#btn-owner-reset").addEventListener("click", async (e) => {
       const btn = e.currentTarget;
       const ok = await confirmDialog({
-        title: "Отвязать владельца?",
+        title: "Отвязать Telegram?",
         text: "Бот перестанет присылать вам черновики и отвечать на команды, пока вы не привяжетесь заново по коду.",
         ok: "Отвязать",
       });
@@ -2607,6 +2653,11 @@
   // ===== Запуск =====
   function init() {
     $("#login-form").addEventListener("submit", onLogin);
+    $("#login-switch").addEventListener("click", (e) => {
+      e.preventDefault();
+      setAuthMode(S.authMode === "register" ? "login" : "register");
+      $("#login-username").focus();
+    });
     $("#btn-logout").addEventListener("click", onLogout);
     $("#btn-logout-2").addEventListener("click", onLogout);
     $("#btn-check").addEventListener("click", (e) => runCheck(e.currentTarget));
@@ -2642,7 +2693,8 @@
     showReturnMessage();
     if (!location.hash) history.replaceState(null, "", "#posts");
     applyRoute();
-    loadState().then(() => {
+    // Сначала — кто вошёл (и CSRF-токен), затем данные этого аккаунта. Без сессии откроется форма входа
+    refreshSession().then((ok) => (ok ? loadState() : null)).then(() => {
       if (S.view === "settings") {
         ensureRepos();
         ensureModels();

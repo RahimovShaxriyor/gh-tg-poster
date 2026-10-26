@@ -145,7 +145,7 @@ sudo -iu deploy
 cd /opt/gh-tg-web
 sh deploy/gen-secrets.sh                 # значения печатаются один раз — сразу в менеджер паролей
 cp .env.production.example .env && chmod 600 .env && nano .env
-#   ADMIN_PASSWORD, SESSION_SECRET, ENCRYPTION_KEY — из gen-secrets
+#   SESSION_SECRET, ENCRYPTION_KEY — из gen-secrets (входа по общему паролю нет: аккаунты регистрируются на сайте)
 #   TG_BOT_TOKEN — токен бота; DOMAIN — ваш домен
 #   APP_UID и APP_GID — вывод `id -u` и `id -g` пользователя deploy
 cp deploy/deploy.env.example deploy/deploy.env && chmod 600 deploy/deploy.env
@@ -199,6 +199,45 @@ sh deploy/restore.sh backups/app_….db.cms --key /tmp/backup-key.pem   # вос
 sh deploy/check.sh                 # диск, память, контейнеры, /health, сертификат, последняя копия
 ```
 
+Откат на однопользовательскую версию возможен только вместе с копией базы, сделанной до перехода на аккаунты: `rollback.sh` без `--with-db` откажется, если база уже в новой схеме, а с `--with-db` возьмёт только копию старой схемы.
+
+### Первое обновление до версии с аккаунтами
+
+Это обновление меняет схему базы и способ входа, поэтому делается вручную, по шагам. Данные не удаляются: старые посты и настройки после обновления никому не видны, пока их не заберёт владелец.
+
+```sh
+sudo -iu deploy && cd /opt/gh-tg-web
+SHA=<полный sha коммита в master>
+git fetch origin master
+
+# 1. Копия базы и новая версия рядом, в отдельной папке (рабочая не меняется)
+sh deploy/backup.sh --pre-deploy
+git worktree add /tmp/gtw-new "$SHA"
+docker build -t gh-tg-web:rehearsal /tmp/gtw-new
+
+# 2. Репетиция на копии: перенос, расшифровка ключей, закрытая и открытая регистрация
+mkdir -p backups/rehearsal && cp "$(ls -1t backups/predeploy/app_*.db | head -n 1)" backups/rehearsal/app.db
+docker run --rm --user "$(id -u):$(id -g)" --env-file .env -v "$PWD/backups/rehearsal:/work" \
+  gh-tg-web:rehearsal node scripts/rehearse-upgrade.js /work/app.db --username <имя-владельца>
+# Ждём «Все проверки пройдены». Иначе — не обновляемся.
+shred -u backups/rehearsal/app.db
+
+# 3. Регистрация закрыта на время переноса
+printf '\nREGISTRATION_OPEN=0\n' >> .env
+
+# 4. Обновление НОВЫМ deploy.sh (у старого нет проверки схемы при автооткате)
+APP_DIR=/opt/gh-tg-web sh /tmp/gtw-new/deploy/deploy.sh "$SHA"
+
+# 5. Перенос владельца (пароль спросит скрытым вводом) и проверка
+docker compose exec app node scripts/claim-legacy.js --username <имя-владельца> --dry-run
+docker compose exec app node scripts/claim-legacy.js --username <имя-владельца>
+#    Вход на сайте, посты на месте, бот: /status, панель: «Проверить» у GitHub, Telegram, ИИ.
+
+# 6. Открыть регистрацию: удалить строку REGISTRATION_OPEN=0 и ADMIN_PASSWORD из .env, затем
+docker compose up -d
+git worktree remove /tmp/gtw-new && docker rmi gh-tg-web:rehearsal
+```
+
 ## 12. Мониторинг
 
 - **Внешняя проверка**: [UptimeRobot](https://uptimerobot.com/) или аналог — монитор HTTP(s) на `https://ваш-домен/health`, ключевое слово `ok`, уведомления на почту или в Telegram.
@@ -218,7 +257,8 @@ sh deploy/check.sh                 # диск, память, контейнер�
 
 ## 14. Чеклист безопасности
 
-- [ ] `ADMIN_PASSWORD` длинный и **новый** (не тот, что был локально и в тестах); `SESSION_SECRET` и `ENCRYPTION_KEY` из `gen-secrets.sh`.
+- [ ] `SESSION_SECRET` и `ENCRYPTION_KEY` из `gen-secrets.sh`, **новые** (не те, что были локально и в тестах). `ADMIN_PASSWORD` больше не нужен.
+- [ ] Данные прежней версии перенесены в свой аккаунт (`scripts/claim-legacy.js`), значение `REGISTRATION_OPEN` выбрано осознанно.
 - [ ] `ENCRYPTION_KEY` и `backup-key.pem` сохранены в менеджере паролей, `backup-key.pem` на сервере нет.
 - [ ] `.env` с правами 600 и не в репозитории; репозиторий приватный.
 - [ ] GitHub App: права только *Contents: Read-only* (так создаёт кнопка в панели); deploy key — только чтение.

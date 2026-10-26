@@ -5,6 +5,7 @@ const { createDatabase } = require("../lib/db");
 const { createApp } = require("../lib/app");
 const poster = require("../lib/poster");
 const { fakeAi } = require("./helpers/fake-ai");
+const { TEST_PASSWORD, tenantDb } = require("./helpers/tenant");
 
 const SHA_A = "a".repeat(40);
 const SHA_B = "b".repeat(40);
@@ -23,7 +24,7 @@ describe("Пояснения автора", () => {
     const w = console.warn;
     console.warn = () => {};
     ctx = {
-      ...createDatabase(":memory:", "notes-key"),
+      ...tenantDb(":memory:", "notes-key"),
       ADMIN_PASSWORD: "notes-pass",
       SESSION_SECRET: "s".repeat(40),
       aiCall: fakeAi({ calls, facts: (req) => facts(req), text: "Экспорт поддерживает 3 формата" }),
@@ -34,14 +35,14 @@ describe("Пояснения автора", () => {
     server = http.createServer(createApp(ctx));
     await new Promise((r) => server.listen(0, r));
     base = `http://127.0.0.1:${server.address().port}`;
-    const login = await fetch(`${base}/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: "notes-pass" }) });
+    const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "owner", password: TEST_PASSWORD }) });
     cookie = login.headers.get("set-cookie").split(";")[0];
   });
   after(() => new Promise((r) => server.close(r)));
 
   const post = (path, body) => fetch(base + path, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify(body) });
   const addPost = (status = "draft") =>
-    Number(ctx.db.prepare("insert into posts(head,input,input_data,commits,status) values('h','вход',?,?,?)").run(JSON.stringify(DATA), COMMITS, status).lastInsertRowid);
+    Number(ctx.db.prepare("insert into posts(user_id,head,input,input_data,commits,status) values(1,'h','вход',?,?,?)").run(JSON.stringify(DATA), COMMITS, status).lastInsertRowid);
 
   it("сохраняются вместе с постом: к посту и к его коммитам, пустые отбрасываются", async () => {
     const id = addPost();
@@ -94,7 +95,7 @@ describe("Пояснения автора", () => {
   });
 
   it("старый пост без input_data: пояснения всё равно доходят, коммиты берутся из списка поста", () => {
-    const id = Number(ctx.db.prepare("insert into posts(head,input,commits,notes,status) values('h','Коммиты:\n- fix',?,?, 'draft')")
+    const id = Number(ctx.db.prepare("insert into posts(user_id,head,input,commits,notes,status) values(1,'h','Коммиты:\n- fix',?,?, 'draft')")
       .run(COMMITS, JSON.stringify({ post: "Пояснение", commits: {} })).lastInsertRowid);
     const data = poster.pipelineData(ctx.post(id));
     assert.deepEqual(data.commits.map((c) => c.sha), [SHA_A, SHA_B]);
